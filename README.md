@@ -1,9 +1,11 @@
 # CampusGuide
 
 CampusGuide
+
 🚀 Live Demo
-👉 CampusGuide Live App:
-https://huggingface.co/spaces/bhaskar-2/college
+
+👉 CampusGuide Live App: https://huggingface.co/spaces/bhaskar-2/college
+
 The application is a live RAG-based academic assistant that delivers accurate, document-grounded responses for university policies, internships, placements, and academic regulations.
 
 ## Project Description
