@@ -1,5 +1,11 @@
 # CampusGuide
 
+CampusGuide
+🚀 Live Demo
+👉 CampusGuide Live App:
+https://huggingface.co/spaces/bhaskar-2/college
+The application is a live RAG-based academic assistant that delivers accurate, document-grounded responses for university policies, internships, placements, and academic regulations.
+
 ## Project Description
 
 CampusGuide is a hallucination-safe Retrieval-Augmented Generation (RAG) application built with Streamlit, designed specifically for academic governance at ICFAI University. It provides accurate, document-grounded answers to questions about internship guidelines, placement policies, and academic regulations. By leveraging FAISS vector search, Sentence-Transformer embeddings, and Groq's llama-3.1-8b-instant model, CampusGuide ensures zero hallucinations through strict context-only generation and multi-layered validation. This makes it ideal for high-stakes academic environments where accuracy and traceability are paramount. As a hackathon-ready project, it demonstrates production-grade AI safety practices while being easily deployable and maintainable.
