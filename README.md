@@ -1,0 +1,240 @@
+# CampusGuide
+
+## Project Description
+
+CampusGuide is a hallucination-safe Retrieval-Augmented Generation (RAG) application built with Streamlit, designed specifically for academic governance at ICFAI University. It provides accurate, document-grounded answers to questions about internship guidelines, placement policies, and academic regulations. By leveraging FAISS vector search, Sentence-Transformer embeddings, and Groq's llama-3.1-8b-instant model, CampusGuide ensures zero hallucinations through strict context-only generation and multi-layered validation. This makes it ideal for high-stakes academic environments where accuracy and traceability are paramount. As a hackathon-ready project, it demonstrates production-grade AI safety practices while being easily deployable and maintainable.
+
+## Tags / Keywords
+
+- RAG (Retrieval-Augmented Generation)
+- Streamlit
+- Groq LLM
+- FAISS Vector Search
+- Sentence Transformers
+- NLP (Natural Language Processing)
+- PDF Question Answering
+- Hallucination-Safe AI
+- Academic AI Assistant
+- Policy QA System
+- Document Grounded Responses
+- Hackathon Project
+- Production-Ready AI
+- Academic Governance
+- Zero-Hallucination AI
+
+---
+
+## Overview
+
+CampusGuide is a Streamlit-based RAG application designed for high-risk academic governance domains where accuracy and traceability are critical.
+The system prevents hallucinations by grounding all responses in official ICFAI University documents and provides explicit source citations.
+
+---
+
+## Architecture
+
+### RAG Pipeline
+
+1. **Document Ingestion**
+   - Plain text file support (.txt files only)
+   - UTF-8 text loading with line number tracking
+   - Text cleaning and validation
+   - Chunking with configurable overlap
+   - Free local embedding generation (Sentence Transformers)
+
+2. **Retrieval**
+   - Semantic search using FAISS vector store
+   - Role-based filtering (student, faculty, coordinator, parent)
+   - Similarity threshold gating
+
+3. **Generation**
+   - Context-only LLM prompting
+   - Low temperature for factual responses
+   - Groq LLM (llama-3.1-8b-instant model)
+
+4. **Validation**
+   - Retrieval confidence gating
+   - Post-generation grounding verification
+   - Sentence-level validation
+
+---
+
+## Hallucination Prevention Strategy
+
+- Retrieval Gate: Minimum similarity threshold and supporting chunks required
+- Context-Only Generation: System prompts enforce no external knowledge
+- Grounding Validation: Every answer sentence verified against retrieved context
+- Refusal Response: Standardized message when information is unavailable
+
+---
+
+## Source Traceability
+
+- Document name and page number citations
+- Relevant text excerpts
+- Human-readable source information
+- No technical jargon in user interface
+
+---
+
+## Features
+
+- Role-Based Access: Different document access based on user role
+- Document Versioning: Newer documents override older ones
+- Incremental Updates: Add new PDFs without full retraining
+- Robust PDF Processing: Handles tables, OCR fallback, page mapping
+- Session Management: Chat history with configurable limits
+
+---
+
+## Tech Stack
+
+- **Frontend**: Streamlit
+- **Backend**: Python
+- **AI/ML**: Sentence Transformers, FAISS, Groq LLM
+- **Data Processing**: Custom text cleaning and splitting
+- **Deployment**: Streamlit Cloud or local
+
+---
+
+## Installation
+
+1. Clone the repository:
+   git clone https://gitlab.com/campusguide/campusguide-website.git  
+   cd CampusGuide
+
+2. Install dependencies:
+   pip install -r requirements.txt
+
+3. Set up environment variables:
+   Edit `.env` with your Groq API key:
+
+   ```bash
+   # Only Groq API key needed (completely free embeddings)
+   API_PROVIDER=xai
+   API_KEY=your_xai_api_key_here  # Get from https://x.ai
+   ```
+
+4. Add official documents:
+   Place PDF or image files (PNG, JPG, JPEG, BMP, TIFF) inside `data/raw/`
+
+5. Run the application:
+   streamlit run app.py
+
+---
+
+## Configuration
+
+All configuration is centralized in `config/config.py`, including:
+- LLM model and temperature
+- Embedding parameters
+- Retrieval thresholds
+- Document processing options
+- UI settings
+
+---
+
+## Project Structure
+
+CampusGuide/
+├── app.py  
+├── config/  
+│   └── config.py  
+├── data/  
+│   ├── raw/  
+│   └── processed/  
+├── ingestion/  
+│   ├── document_loader.py  
+│   ├── text_cleaner.py  
+│   └── text_splitter.py  
+├── embeddings/  
+│   ├── embedder.py  
+│   └── vector_store.py  
+├── retriever/  
+│   └── retriever.py  
+├── llm/  
+│   ├── prompt_templates.py  
+│   └── answer_generator.py  
+├── validation/  
+│   ├── safety_checker.py  
+│   └── grounding_validator.py  
+├── ui/  
+│   ├── sidebar.py  
+│   └── chat_ui.py  
+├── utils/  
+│   ├── logger.py  
+│   └── helpers.py  
+├── evaluation/  
+│   └── test_queries.json  
+├── requirements.txt  
+├── README.md  
+└── .env  
+
+---
+
+## Usage
+
+1. Place PDF files in `data/raw/`
+2. Select user role (student / faculty / coordinator / parent)
+3. Ask questions in natural language
+4. Review cited sources for verification
+
+---
+
+## Data Usage Disclaimer
+
+This project uses publicly available data sourced from the official ICFAI University website and other college-related documents. The data includes text from placement policies, academic guidelines, and similar materials.
+
+**Important Notes:**
+- The project does NOT claim ownership of any of the data used.
+- The data is used solely for academic and non-commercial purposes.
+- This is a student-developed project for educational purposes.
+- All data remains the property of its original creators and publishers.
+- Users should ensure they comply with the terms of the original data sources.
+
+---
+
+## System Limitations
+
+- Answers strictly limited to provided documents
+- No external or assumed knowledge
+- Requires high-quality PDF extraction
+- Performance depends on document volume
+
+---
+
+## Security Considerations
+
+- No hardcoded secrets
+- Environment-based configuration
+- Role-based access control
+- Audit logging for all queries
+
+---
+
+## Evaluation
+
+Run evaluation using the golden dataset:
+from evaluation.test_queries import evaluate_system  
+results = evaluate_system()
+
+---
+
+## Contributing
+
+1. Follow existing folder structure
+2. Add type hints and docstrings
+3. Update evaluation data for new features
+4. Maintain hallucination prevention guarantees
+
+---
+
+## License
+
+This project is licensed under the GNU AGPLv3. See [LICENSE](LICENSE) for details.
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for recent updates.
