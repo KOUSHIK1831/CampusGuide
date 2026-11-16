@@ -1,4 +1,4 @@
-"""Streamlit entry point for the resume-ready CampusGuide RAG MVP."""
+"""Streamlit entry point for the CampusGuide RAG application."""
 from __future__ import annotations
 
 import os
