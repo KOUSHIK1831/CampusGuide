@@ -1,0 +1,5 @@
+[
+  {"question": "How many library books may students borrow at once?", "expected_source": "campus_faq.md"},
+  {"question": "When are academic advising sessions held?", "expected_source": "campus_faq.md"},
+  {"question": "Where should I report a lost student ID card?", "expected_source": "campus_faq.md"}
+]

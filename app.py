@@ -1,267 +1,151 @@
-import streamlit as st
+"""Streamlit entry point for the resume-ready CampusGuide RAG MVP."""
+from __future__ import annotations
+
 import os
+from pathlib import Path
+
 import streamlit as st
-from typing import Dict, Any
+from dotenv import load_dotenv
 
-from config.config import Config
-from ingestion.document_loader import DocumentLoader
-from ingestion.text_cleaner import TextCleaner
-from ingestion.text_splitter import TextSplitter
-from embeddings.embedder import Embedder
-from embeddings.vector_store import VectorStore
-from retriever.retriever import Retriever
-from llm.answer_generator import AnswerGenerator
-from validation.safety_checker import SafetyChecker
-from validation.grounding_validator import GroundingValidator
-from ui.sidebar import Sidebar
-from ui.chat_ui import ChatUI
-from utils.logger import logger
+from campusguide_rag import (
+    RAGChatbot, SUPPORTED_EXTENSIONS, VectorStore,
+    chunk_documents, load_directory,
+)
+from campusguide_rag.ingestion import MAX_FILE_BYTES
+
+load_dotenv()
+RAW_DIR = Path(os.getenv("DATA_RAW_PATH", "data/raw"))
+INDEX_DIR = Path(os.getenv("VECTOR_STORE_PATH", "data/processed"))
+BACKEND = os.getenv("VECTOR_BACKEND", "faiss")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
 
-class CampusGuideApp:
-    def __init__(self):
-        self.config = Config()
-        self.sidebar = Sidebar()
-        self.chat_ui = ChatUI()
+@st.cache_resource(show_spinner="Loading the local vector index...")
+def get_store() -> VectorStore:
+    store = VectorStore(INDEX_DIR, model_name=EMBEDDING_MODEL, backend=BACKEND)
+    try:
+        loaded = store.load()
+    except (OSError, ValueError, ImportError) as exc:
+        st.warning(f"Stored index cannot be loaded ({exc}). Rebuild it from source documents.")
+        loaded = False
+    # Hosted demo uses only bundled fictional content (data/examples); uploads are disabled.
+    if not loaded and os.getenv("AUTO_INGEST_ON_START", "false").lower() == "true":
+        try:
+            rebuild(store)
+        except (ValueError, OSError, ImportError) as exc:
+            st.warning(f"Automatic demo indexing failed: {exc}")
+    return store
 
-        # RAG components
-        self.document_loader = DocumentLoader()
-        self.text_cleaner = TextCleaner()
-        self.text_splitter = TextSplitter()
-        self.embedder = Embedder()
-        self.vector_store = VectorStore()
-        self.retriever = Retriever()
-        self.answer_generator = AnswerGenerator()
-        self.safety_checker = SafetyChecker()
-        self.grounding_validator = GroundingValidator()
 
-        self._initialize_system()
+def rebuild(store: VectorStore) -> tuple[int, int, list[str]]:
+    units, errors = load_directory(RAW_DIR)
+    chunks = chunk_documents(units)
+    if not chunks:
+        raise ValueError("No extractable documents. Add TXT, MD, JSON, DOCX or text-based PDF files.")
+    store.build(chunks)
+    store.save()
+    return len({c["source"] for c in chunks}), len(chunks), errors
 
-    # ---------------- INITIALIZATION ---------------- #
 
-    def _initialize_system(self):
-        logger.info("Initializing CampusGuide system...")
+def save_uploads(files: list) -> int:
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    saved = 0
+    for item in files:
+        # Both Linux and Windows separators are stripped; only a filename is stored.
+        name = item.name.replace("\\", "/").rsplit("/", 1)[-1]
+        if not name or Path(name).suffix.lower() not in SUPPORTED_EXTENSIONS:
+            st.warning(f"Skipped unsupported file: {name}")
+            continue
+        data = item.getvalue()
+        if len(data) > MAX_FILE_BYTES:
+            st.warning(f"Skipped {name}: exceeds 15 MB limit")
+            continue
+        (RAW_DIR / name).write_bytes(data)
+        saved += 1
+    return saved
 
-        if self.vector_store.load():
-            st.session_state["system_ready"] = True
-            logger.info("Vector store loaded")
+
+def main() -> None:
+    st.set_page_config(page_title="CampusGuide | Document RAG", page_icon="🎓", layout="wide")
+    st.title("🎓 CampusGuide")
+    st.caption("Ask questions about locally indexed documents. Answers include retrieval citations, not guarantees of correctness.")
+    store = get_store()
+    with st.sidebar:
+        st.header("Knowledge base")
+        uploads_enabled = os.getenv("ALLOW_UPLOADS", "true").lower() == "true"
+        uploads = None
+        if uploads_enabled:
+            uploads = st.file_uploader(
+                "Add documents", type=["pdf", "txt", "docx", "md", "markdown", "json"],
+                accept_multiple_files=True,
+                help="Text-based PDFs only; maximum 15 MB per file. Duplicate filenames are replaced.",
+            )
         else:
-            raw_dir = self.config.DATA_RAW_PATH
-
-            supported_files_exist = os.path.exists(raw_dir) and any(
-                f.lower().endswith(tuple(self.config.SUPPORTED_EXTENSIONS))
-                for f in os.listdir(raw_dir)
-            )
-
-            if supported_files_exist:
-                logger.info(
-                    "Documents found in raw directory. Auto-ingesting documents..."
-                )
-                self.ingest_documents()
-                st.session_state["system_ready"] = True
-            else:
-                logger.warning("No supported documents found for ingestion")
-
-                st.session_state["system_ready"] = False
-
-        st.session_state["retrieval_stats"] = self.retriever.get_retrieval_stats()
-
-    # ---------------- INGESTION ---------------- #
-
-    def handle_file_uploads(self, uploaded_files):
-        """Handle file uploads from Streamlit UI."""
-        if not uploaded_files:
-            return False
-
-        raw_dir = self.config.DATA_RAW_PATH
-        os.makedirs(raw_dir, exist_ok=True)
-
-        saved_files = []
-        for uploaded_file in uploaded_files:
-            # Validate file type
-            if not uploaded_file.name.lower().endswith(".txt"):
-                continue
-
-            # Create unique filename to avoid overwrites
-            base_name = os.path.splitext(uploaded_file.name)[0]
-            ext = ".txt"
-            counter = 0
-            file_path = os.path.join(raw_dir, uploaded_file.name)
-
-            while os.path.exists(file_path):
-                counter += 1
-                file_path = os.path.join(raw_dir, f"{base_name}_{counter}{ext}")
-
-            # Save file
+            st.info("Hosted demo: uploads are disabled; only fictional sample documents are indexed.")
+        if uploads_enabled and st.button("Save uploads and rebuild", type="primary", disabled=not uploads):
             try:
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                saved_files.append(file_path)
-                logger.info(f"Saved uploaded file: {file_path}")
-            except Exception as e:
-                logger.error(f"Failed to save file {uploaded_file.name}: {e}")
-                continue
-
-        if saved_files:
-            # Trigger full ingestion to rebuild vector store with all files
-            logger.info(
-                f"Uploaded {len(saved_files)} files, rebuilding knowledge base..."
-            )
-            self.ingest_documents()
-            return True
-
-        return False
-
-    def ingest_documents(self):
-        raw_dir = self.config.DATA_RAW_PATH
-
-        # Ensure processed directory exists
-        processed_dir = self.config.DATA_PROCESSED_PATH
-        os.makedirs(processed_dir, exist_ok=True)
-
-        logger.info("Starting document ingestion...")
-
-        # Clear existing vector store to rebuild fresh
-        self.vector_store.clear()
-        logger.info("Cleared existing vector store for fresh rebuild")
-
-        documents = self.document_loader.load_multiple_documents(raw_dir)
-        if not documents:
-            logger.warning("No documents found")
-            return
-
-        all_chunks = []
-        for doc in documents:
-            doc["text"] = self.text_cleaner.clean_text(doc["text"])
-            all_chunks.extend(self.text_splitter.split_document(doc))
-
-        # Fit the embedder on all chunk texts first
-        chunk_texts = [chunk["text"] for chunk in all_chunks]
-        self.embedder.fit_on_texts(chunk_texts)
-
-        # Then embed the chunks
-        embedded_chunks = self.embedder.embed_chunks(all_chunks)
-        self.vector_store.add_chunks(embedded_chunks)
-        self.vector_store.save()
-
-        st.session_state["system_ready"] = True
-
-        logger.info(
-            f"Ingested {len(documents)} documents with {len(all_chunks)} chunks"
-        )
-
-    # ---------------- QUERY PIPELINE ---------------- #
-
-    def process_query(self, query: str, role: str) -> Dict[str, Any]:
-        logger.info(f"Processing query: {query}")
-
-        retrieval_result = self.retriever.retrieve(query, role)
-        safety = self.safety_checker.check_retrieval_safety(retrieval_result)
-
-        # ❌ Retrieval confidence failure
-        if not safety["safe"]:
-            return self._refusal_response()
-
-        chunks = retrieval_result["chunks"]
-        answer = self.answer_generator.generate_answer(query, chunks)
-
-        # ❌ LLM refusal
-        if self._is_refusal(answer):
-            return self._refusal_response()
-
-        # ❌ Grounding failure
-        grounding = self.grounding_validator.validate_answer_grounding(
-            answer, chunks, query
-        )
-        if not grounding["valid"]:
-            return self._refusal_response()
-
-        # ✅ Valid answer
-        return {
-            "answer": answer,
-            "sources": self._prepare_sources(chunks),
-        }
-
-    # ---------------- HELPERS ---------------- #
-
-    def _is_refusal(self, answer: str) -> bool:
-        refusal_markers = [
-            "not available in the provided documents",
-            "do not explicitly",
-            "cannot provide an answer",
-        ]
-        return any(marker in answer.lower() for marker in refusal_markers)
-
-    def _refusal_response(self) -> Dict[str, Any]:
-        return {
-            "answer": (
-                "The internship guidelines do not explicitly list the documents students "
-                "must carry during placement induction. To avoid assumptions, the system "
-                "cannot provide an answer based on the available documents."
-            ),
-            "sources": [],
-            "source_note": (
-                "No sections in the provided documents explicitly mention this information."
-            ),
-        }
-
-    def _prepare_sources(self, chunks: list) -> list:
-        sources, seen = [], set()
-
-        for chunk in chunks:
-            meta = chunk.get("metadata", {})
-            key = (meta.get("filename"), tuple(chunk.get("pages", [])))
-            if key in seen:
-                continue
-
-            sources.append(
-                {
-                    "filename": meta.get("filename", "Unknown"),
-                    "pages": sorted(chunk.get("pages", [])),
-                    "excerpt": chunk["text"][:300],
-                }
-            )
-            seen.add(key)
-
-        return sources
-
-    # ---------------- UI ---------------- #
-
-    def run(self):
-        st.set_page_config(
-            page_title="CampusGuide - ICFAI University Assistant",
-            page_icon="🎓",
-            layout="wide",
-        )
-
-        # Handle file uploads first
-        if "uploaded_files" in st.session_state and st.session_state["uploaded_files"]:
-            with st.spinner("Processing uploaded files..."):
-                success = self.handle_file_uploads(st.session_state["uploaded_files"])
-                if success:
-                    st.success("✅ Files uploaded and processed successfully!")
-                    st.session_state["uploaded_files"] = []  # Clear after processing
-                    st.rerun()  # Refresh to update stats
+                saved = save_uploads(uploads)
+                if saved:
+                    with st.spinner("Embedding all documents..."):
+                        docs, chunks, errors = rebuild(store)
+                    st.success(f"Indexed {docs} document(s), {chunks} chunks")
+                    for error in errors:
+                        st.warning(error)
+                    st.session_state["chat_history"] = []
                 else:
-                    st.error("❌ Failed to process uploaded files.")
+                    st.warning("No supported documents were uploaded")
+            except (ValueError, OSError, ImportError) as exc:
+                st.error(f"Could not rebuild: {exc}")
+        if uploads_enabled and st.button("Rebuild index from data/raw"):
+            try:
+                with st.spinner("Embedding corpus..."):
+                    docs, chunks, errors = rebuild(store)
+                st.success(f"Indexed {docs} document(s), {chunks} chunks")
+                for error in errors:
+                    st.warning(error)
+                st.session_state["chat_history"] = []
+            except (ValueError, OSError, ImportError) as exc:
+                st.error(f"Could not rebuild: {exc}")
+        stats = store.stats()
+        st.metric("Indexed documents", stats["documents"])
+        st.metric("Indexed chunks", stats["chunks"])
+        st.caption(f"Vector backend: {stats['backend']}")
+        st.caption("This demo has no authentication or document-level authorization. Use non-sensitive documents only.")
 
-        # Auto-ingest documents if not ready (for initial load or restart)
-        if not st.session_state.get("system_ready"):
-            with st.spinner("Loading documents..."):
-                self.ingest_documents()
-            if not st.session_state.get("system_ready"):
-                st.error(
-                    "❌ Failed to load documents. Please add .txt files to data/raw/ and restart the application."
-                )
-                return
+    if not store.ready:
+        st.info("Index a document using the sidebar or run `python scripts/ingest.py` first.")
+        return
 
-        role = self.sidebar.render()
-        self.chat_ui.set_query_callback(self.process_query)
-        self.chat_ui.render_chat_interface(role)
+    if "chat_history" not in st.session_state:
+        st.session_state["chat_history"] = []
+    for message in st.session_state["chat_history"]:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            for source in message.get("sources", []):
+                with st.expander(f"[{source['ref']}] {source['source']}" + (f" · page {source['page']}" if source['page'] else "")):
+                    st.caption(f"Similarity: {source['score']:.3f}")
+                    st.code(source["excerpt"], language=None)
 
-
-def main():
-    CampusGuideApp().run()
+    # Session quota reduces accidental usage; this is NOT a global security/rate-limit control.
+    max_demo_queries = int(os.getenv("MAX_DEMO_QUERIES", "0"))
+    used_queries = sum(m["role"] == "user" for m in st.session_state["chat_history"])
+    quota_reached = max_demo_queries > 0 and used_queries >= max_demo_queries
+    if quota_reached:
+        st.info("Demo session query limit reached. Start a new browser session to try again.")
+    prompt = st.chat_input("What do the documents say about ...?", disabled=quota_reached)
+    if prompt:
+        st.session_state["chat_history"].append({"role": "user", "content": prompt})
+        try:
+            with st.spinner("Retrieving evidence and generating answer..."):
+                bot = RAGChatbot(store, model=os.getenv("LLM_MODEL", "llama-3.1-8b-instant"),
+                                 min_score=float(os.getenv("MIN_RETRIEVAL_SCORE", "0.30")))
+                response = bot.ask(prompt)
+            st.session_state["chat_history"].append({
+                "role": "assistant", "content": response["answer"], "sources": response["sources"]
+            })
+        except (RuntimeError, ValueError) as exc:
+            st.session_state["chat_history"].append({"role": "assistant", "content": str(exc), "sources": []})
+        st.rerun()
 
 
 if __name__ == "__main__":

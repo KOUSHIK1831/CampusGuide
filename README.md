@@ -1,248 +1,137 @@
-# CampusGuide
+# CampusGuide — source-cited RAG chatbot
 
-CampusGuide
+**A reproducible resume project:** ingest campus-related documents, create local embeddings and a FAISS index, retrieve relevant passages, and ask Groq's Llama model to answer with numbered source citations. Built with **Python 3.12, Streamlit, Sentence Transformers, FAISS, and Groq**.
 
-🚀 Live Demo
+The repository also contains earlier experimental modules (`ingestion/`, `embeddings/`, `retriever/`, `llm/`, `validation/`, `ui/`). The **maintained entry point** is `app.py`, backed by the new `campusguide_rag/` package. The older modules are retained as history, not wired into the new UI.
 
-👉 CampusGuide Live App: https://huggingface.co/spaces/bhaskar-2/college
+## Implemented capabilities
 
-The application is a live RAG-based academic assistant that delivers accurate, document-grounded responses for university policies, internships, placements, and academic regulations.
+- PDF (extractable text), DOCX, TXT, Markdown, and JSON ingestion; per-document source metadata and PDF page tracking.
+- Overlapping chunks, offline/local `all-MiniLM-L6-v2` embeddings, normalized FAISS inner-product vector search (cosine similarity), and JSON metadata persistence.
+- Retrieval score gating, context-only generation with Groq Llama, citation checks, safe fallback for missing evidence, and example prompts.
+- Streamlit uploads and knowledge-base rebuilding; pure-Python CLI ingestion, offline retrieval evaluation, unit tests, GitHub Actions CI, and Docker.
 
-## Project Description
+**Important limitations:** Citations and guardrails lower hallucination risk but **do not guarantee factual accuracy**. Citation checks validate references, not entailment. This demo has no login, actual role-based authorization, document versioning, OCR for scanned PDFs, or production hardening. Do not upload confidential data; retrieved excerpts are sent to Groq when you ask a question.
 
-CampusGuide is a hallucination-safe Retrieval-Augmented Generation (RAG) application built with Streamlit, designed specifically for academic governance at ICFAI University. It provides accurate, document-grounded answers to questions about internship guidelines, placement policies, and academic regulations. By leveraging FAISS vector search, Sentence-Transformer embeddings, and Groq's llama-3.1-8b-instant model, CampusGuide ensures zero hallucinations through strict context-only generation and multi-layered validation. This makes it ideal for high-stakes academic environments where accuracy and traceability are paramount. As a hackathon-ready project, it demonstrates production-grade AI safety practices while being easily deployable and maintainable.
+## Quick start
 
-## Tags / Keywords
+Requires **Python 3.12+** and an internet connection on first run to download the embedding model; Groq generation requires a `GROQ_API_KEY`.
 
-- RAG (Retrieval-Augmented Generation)
-- Streamlit
-- Groq LLM
-- FAISS Vector Search
-- Sentence Transformers
-- NLP (Natural Language Processing)
-- PDF Question Answering
-- Hallucination-Safe AI
-- Academic AI Assistant
-- Policy QA System
-- Document Grounded Responses
-- Hackathon Project
-- Production-Ready AI
-- Academic Governance
-- Zero-Hallucination AI
+```bash
+git clone https://github.com/KOUSHIK1831/CampusGuide.git
+cd CampusGuide
+python -m venv .venv
+# Linux/macOS: source .venv/bin/activate
+# Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env   # on Windows: copy .env.example .env
+# Edit .env and enter GROQ_API_KEY
+```
 
----
+The repository includes sample raw data in `data/raw/`. For a clearly fictional, reproducible demo, first copy `data/examples/campus_faq.md` to `data/raw/campus_faq.md`:
 
-## Overview
+```bash
+cp data/examples/campus_faq.md data/raw/campus_faq.md
+python scripts/ingest.py
+streamlit run app.py
+```
 
-CampusGuide is a Streamlit-based RAG application designed for high-risk academic governance domains where accuracy and traceability are critical.
-The system prevents hallucinations by grounding all responses in official ICFAI University documents and provides explicit source citations.
+Open `http://localhost:8501`. Alternatively, upload documents through the sidebar and click **Save uploads and rebuild**. The index is stored in the ignored `data/processed/` directory. New uploads trigger a full rebuild; this is intentional for a small MVP corpus.
 
----
+Supported inputs: `.pdf` (text-based only), `.txt`, `.docx`, `.md`, `.markdown`, `.json`. A JSON top-level list or `{ "documents": [...] }` is ingested record by record. Files larger than 15 MB are rejected. Current UI uploads overwrite a prior file of the same name.
+
+## Run tests and retrieval evaluation
+
+```bash
+pip install 'pytest>=8,<10'
+python -m pytest -q
+python scripts/evaluate.py --cases evaluation/demo_cases.json --k 4
+```
+
+**Evaluation meaning:** `source_hit_at_4` measures whether the expected document appears in the top four retrieved chunks; `retrieval_refusal_rate` measures how often a negative query returns no retrieved chunks. It does **not** measure answer accuracy, grounding, hallucination rate, or user satisfaction. `evaluation/demo_cases.json` assumes the fictional `campus_faq.md` file was indexed. Record actual results after running; do not copy unmeasured percentages into a resume. Tune `MIN_RETRIEVAL_SCORE` using a balanced set of positive and negative questions.
+
+## Example conversation (illustrative, not a recorded live response)
+
+**User:** How many library books can I borrow?
+
+**CampusGuide:** Students may borrow up to four library books at once, for fourteen days. [1]
+
+**Source [1]:** `campus_faq.md`, Library section.
+
+**User:** What is the university's shuttle service schedule?
+
+**CampusGuide:** The requested information is not available in the provided documents.
+
+The example knowledge base is **fictional**, not an official university document. Actual responses depend on retrieved chunks and the selected LLM.
 
 ## Architecture
 
-### RAG Pipeline
+```text
+TXT / MD / JSON / PDF / DOCX
+       │
+       ▼
+Per-file extraction + page metadata
+       │
+       ▼
+Character chunks with overlap
+       │
+       ▼
+Sentence Transformers (normalized embeddings)
+       │
+       ▼
+FAISS IndexFlatIP + JSON source metadata
+       │
+Question ──► embedding ──► top-k similarity gate
+                                      │ no hits: refuse
+                                      ▼
+                           Untrusted context excerpts
+                                      ▼
+                           Groq Llama + grounded prompt
+                                      ▼
+                           Citation number verification
+                                      ▼
+                           Answer + source excerpts
+```
 
-1. **Document Ingestion**
-   - Plain text file support (.txt files only)
-   - UTF-8 text loading with line number tracking
-   - Text cleaning and validation
-   - Chunking with configurable overlap
-   - Free local embedding generation (Sentence Transformers)
-
-2. **Retrieval**
-   - Semantic search using FAISS vector store
-   - Role-based filtering (student, faculty, coordinator, parent)
-   - Similarity threshold gating
-
-3. **Generation**
-   - Context-only LLM prompting
-   - Low temperature for factual responses
-   - Groq LLM (llama-3.1-8b-instant model)
-
-4. **Validation**
-   - Retrieval confidence gating
-   - Post-generation grounding verification
-   - Sentence-level validation
-
----
-
-## Hallucination Prevention Strategy
-
-- Retrieval Gate: Minimum similarity threshold and supporting chunks required
-- Context-Only Generation: System prompts enforce no external knowledge
-- Grounding Validation: Every answer sentence verified against retrieved context
-- Refusal Response: Standardized message when information is unavailable
-
----
-
-## Source Traceability
-
-- Document name and page number citations
-- Relevant text excerpts
-- Human-readable source information
-- No technical jargon in user interface
-
----
-
-## Features
-
-- Role-Based Access: Different document access based on user role
-- Document Versioning: Newer documents override older ones
-- Incremental Updates: Add new PDFs without full retraining
-- Robust PDF Processing: Handles tables, OCR fallback, page mapping
-- Session Management: Chat history with configurable limits
-
----
-
-## Tech Stack
-
-- **Frontend**: Streamlit
-- **Backend**: Python
-- **AI/ML**: Sentence Transformers, FAISS, Groq LLM
-- **Data Processing**: Custom text cleaning and splitting
-- **Deployment**: Streamlit Cloud or local
-
----
-
-## Installation
-
-1. Clone the repository:
-   git clone https://gitlab.com/campusguide/campusguide-website.git  
-   cd CampusGuide
-
-2. Install dependencies:
-   pip install -r requirements.txt
-
-3. Set up environment variables:
-   Edit `.env` with your Groq API key:
-
-   ```bash
-   # Only Groq API key needed (completely free embeddings)
-   API_PROVIDER=xai
-   API_KEY=your_xai_api_key_here  # Get from https://x.ai
-   ```
-
-4. Add official documents:
-   Place PDF or image files (PNG, JPG, JPEG, BMP, TIFF) inside `data/raw/`
-
-5. Run the application:
-   streamlit run app.py
-
----
+Persistence uses JSON and FAISS's native index format, **not pickle**. Rebuild indexes when changing the embedding model. For a non-FAISS local experiment or unit tests, set `VECTOR_BACKEND=numpy` before ingesting; this stores vectors as `.npy` and uses exact NumPy cosine search.
 
 ## Configuration
 
-All configuration is centralized in `config/config.py`, including:
-- LLM model and temperature
-- Embedding parameters
-- Retrieval thresholds
-- Document processing options
-- UI settings
+Edit `.env` using the keys listed in `.env.example`: `GROQ_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`, `VECTOR_BACKEND`, `VECTOR_STORE_PATH`, `DATA_RAW_PATH`, `MIN_RETRIEVAL_SCORE`. Never commit secrets. If using `uv`, regenerate the repository's older lockfile with `uv lock` after updating dependencies; the documented install path uses pip.
 
----
+## Docker (local demonstration)
 
-## Project Structure
+```bash
+docker build -t campusguide-rag .
+docker run --rm -p 8501:8501 --env-file .env -v "$(pwd)/data:/app/data" campusguide-rag
+```
 
-CampusGuide/
-├── app.py  
-├── config/  
-│   └── config.py  
-├── data/  
-│   ├── raw/  
-│   └── processed/  
-├── ingestion/  
-│   ├── document_loader.py  
-│   ├── text_cleaner.py  
-│   └── text_splitter.py  
-├── embeddings/  
-│   ├── embedder.py  
-│   └── vector_store.py  
-├── retriever/  
-│   └── retriever.py  
-├── llm/  
-│   ├── prompt_templates.py  
-│   └── answer_generator.py  
-├── validation/  
-│   ├── safety_checker.py  
-│   └── grounding_validator.py  
-├── ui/  
-│   ├── sidebar.py  
-│   └── chat_ui.py  
-├── utils/  
-│   ├── logger.py  
-│   └── helpers.py  
-├── evaluation/  
-│   └── test_queries.json  
-├── requirements.txt  
-├── README.md  
-└── .env  
+Create `data/processed` locally first if your platform needs it, and ensure the mount is writable by the container user (UID 10001). After starting, upload documents or use the sidebar's **Rebuild index** button. The first embedding-model download may take time. Docker runs **locally**; no hosted deployment is claimed.
 
----
+## Deploy a public demo (Render blueprint)
 
-## Usage
+A [Render Blueprint](render.yaml) is included for deployment **after pushing to GitHub**. It uses Docker with Streamlit health checks and Render's supplied `PORT`, and indexes **only the bundled fictional demo corpus**. Public uploads are disabled and a per-session demo query limit is configured. **This configuration has not been deployed or verified on a live host.** The free plan may run out of memory while loading PyTorch / Sentence Transformers; do not incur paid hosting costs without explicitly choosing a plan. Read [docs/DEPLOY.md](docs/DEPLOY.md) for prerequisites, deployment instructions, and operational caveats.
 
-1. Place PDF files in `data/raw/`
-2. Select user role (student / faculty / coordinator / parent)
-3. Ask questions in natural language
-4. Review cited sources for verification
+## Three-phase delivery
 
----
+| Phase | Deliverable | State |
+| --- | --- | --- |
+| 1 — MVP | Loaders, chunking, FAISS, retrieval, grounded generation, local Streamlit | Implemented in this update |
+| 2 — Quality | Citation display, modular tests, retrieval metrics, CI | Implemented baseline; expand gold dataset and human answer reviews next |
+| 3 — Packaging | Docker, Render blueprint, README, demonstration | Deployment config included; public deployment, monitoring, auth require account setup/verification |
 
-## Data Usage Disclaimer
+Read [docs/ROADMAP.md](docs/ROADMAP.md) for tradeoffs, safeguards and next steps.
 
-This project uses publicly available data sourced from the official ICFAI University website and other college-related documents. The data includes text from placement policies, academic guidelines, and similar materials.
+## Resume/project showcase
 
-**Important Notes:**
-- The project does NOT claim ownership of any of the data used.
-- The data is used solely for academic and non-commercial purposes.
-- This is a student-developed project for educational purposes.
-- All data remains the property of its original creators and publishers.
-- Users should ensure they comply with the terms of the original data sources.
+**Suggested title:** CampusGuide — Document-Grounded RAG Academic Assistant
 
----
+**Resume-ready bullet (accurate after you run and verify locally):**
 
-## System Limitations
+> Built a document-grounded RAG chatbot using Python, Streamlit, Sentence Transformers, FAISS and Groq Llama, supporting five document families, semantic retrieval, source citations, and automated ingestion/retrieval tests.
 
-- Answers strictly limited to provided documents
-- No external or assumed knowledge
-- Requires high-quality PDF extraction
-- Performance depends on document volume
+To quantify **measured** impact, run the evaluation, report corpus size and chunk count, and expand the question set. For example: “Evaluated retrieval over **N** labeled queries, achieving **X%** source hit@4 at a **Y** similarity threshold” — replace placeholders only with logged measurements. Demonstrate answerable questions, no-evidence refusals and source traceability side by side; disclose error cases and limits.
 
----
+## Data and license
 
-## Security Considerations
-
-- No hardcoded secrets
-- Environment-based configuration
-- Role-based access control
-- Audit logging for all queries
-
----
-
-## Evaluation
-
-Run evaluation using the golden dataset:
-from evaluation.test_queries import evaluate_system  
-results = evaluate_system()
-
----
-
-## Contributing
-
-1. Follow existing folder structure
-2. Add type hints and docstrings
-3. Update evaluation data for new features
-4. Maintain hallucination prevention guarantees
-
----
-
-## License
-
-This project is licensed under the GNU AGPLv3. See [LICENSE](LICENSE) for details.
-
----
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for recent updates.
+The bundled raw document files may reflect third-party institutional material. Verify permission and license before redistributing or deploying. The `campus_faq.md` fixture is fictional. Existing project license: [GNU AGPLv3](LICENSE).

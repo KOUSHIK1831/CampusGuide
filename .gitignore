@@ -1,26 +1,15 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Virtual environments
-venv/
+.env
 .venv/
-
-# Environment variables
-#.env
-
-# Vector store & processed data
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
 data/processed/
 *.faiss
 *.pkl
-
-# OS / Editor
 .DS_Store
 .vscode/
 .idea/
-
-# Logs
 *.log
-.env
