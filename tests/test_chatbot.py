@@ -99,3 +99,15 @@ def test_unexpected_provider_exception_does_not_leak_secret():
     except RuntimeError as exc:
         assert "SECRET_TOKEN_DO_NOT_ECHO" not in str(exc)
         assert "Groq" in str(exc)
+
+
+def test_citations_include_all_passage_text_sent_to_llm():
+    """Supporting facts after character 400 must still be visible in the UI."""
+    passage = ("This is background context. " * 24) + "Deadline is May 24."
+    assert 400 < len(passage) < 1250
+    hit = {"source": "calendar.pdf", "page": 7, "text": passage, "score": 0.97}
+    client = FakeClient("The deadline is May 24 [1].")
+    answer = RAGChatbot(FakeStore([hit]), client).ask("What is the deadline?")
+    assert answer["sources"][0]["excerpt"] == passage
+    assert passage in client.calls[0]["messages"][1]["content"]
+    assert "May 24" in answer["sources"][0]["excerpt"]

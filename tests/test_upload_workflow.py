@@ -92,3 +92,14 @@ def test_two_session_stores_do_not_share_uploaded_chunks():
     assert first.search("secret", min_score=0.5)[0]["source"] == "first.txt"
     assert second.search("secret", min_score=0.5) == []
     assert second.stats()["documents"] == 1
+
+
+def test_bad_docx_upload_rejects_entire_batch_without_partial_index():
+    """BYOK upload rejects incomplete batches; directory CLI skips bad files."""
+    with pytest.raises(ValueError, match="Unreadable DOCX document"):
+        load_document_bytes("bad.docx", b"not-a-valid-docx-file")
+    with pytest.raises(ValueError, match="Unreadable DOCX document"):
+        prepare_uploaded_documents([
+            ("good.txt", b"Valid campus information"),
+            ("bad.docx", b"not-a-valid-docx-file"),
+        ])

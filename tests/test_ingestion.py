@@ -85,3 +85,15 @@ def test_reject_oversized_file(tmp_path):
         f.truncate(MAX_FILE_BYTES + 1)
     with pytest.raises(ValueError, match="limit"):
         load_document(file)
+
+
+def test_bad_docx_does_not_abort_directory_ingestion(tmp_path):
+    """CLI ingestion skips a malformed DOCX and retains healthy text files."""
+    (tmp_path / "good.txt").write_text("Library books can be borrowed.", encoding="utf-8")
+    (tmp_path / "bad.docx").write_bytes(b"not-a-valid-docx-file")
+    units, errors = load_directory(tmp_path)
+    assert len(units) == 1
+    assert units[0]["source"] == "good.txt"
+    assert len(errors) == 1
+    assert "bad.docx" in errors[0]
+    assert "Unreadable DOCX document" in errors[0]
