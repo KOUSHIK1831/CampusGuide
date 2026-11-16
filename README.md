@@ -1,6 +1,6 @@
 # CampusGuide — source-cited RAG chatbot
 
-**A reproducible resume project:** ingest campus-related documents, create local embeddings and a FAISS index, retrieve relevant passages, and ask Groq's Llama model to answer with numbered source citations. Built with **Python 3.12, Streamlit, Sentence Transformers, FAISS, and Groq**.
+**A reproducible academic RAG application:** ingest campus-related documents, create local embeddings and a FAISS index, retrieve relevant passages, and ask Groq's Llama model to answer with numbered source citations. Built with **Python 3.12, Streamlit, Sentence Transformers, FAISS, and Groq**.
 
 The repository also contains earlier experimental modules (`ingestion/`, `embeddings/`, `retriever/`, `llm/`, `validation/`, `ui/`). The **maintained entry point** is `app.py`, backed by the new `campusguide_rag/` package. The older modules are retained as history, not wired into the new UI.
 
@@ -48,7 +48,7 @@ python -m pytest -q
 python scripts/evaluate.py --cases evaluation/demo_cases.json --k 4
 ```
 
-**Evaluation meaning:** `source_hit_at_4` measures whether the expected document appears in the top four retrieved chunks; `retrieval_refusal_rate` measures how often a negative query returns no retrieved chunks. It does **not** measure answer accuracy, grounding, hallucination rate, or user satisfaction. `evaluation/demo_cases.json` assumes the fictional `campus_faq.md` file was indexed. Record actual results after running; do not copy unmeasured percentages into a resume. Tune `MIN_RETRIEVAL_SCORE` using a balanced set of positive and negative questions.
+**Evaluation meaning:** `source_hit_at_4` measures whether the expected document appears in the top four retrieved chunks; `retrieval_refusal_rate` measures how often a negative query returns no retrieved chunks. It does **not** measure answer accuracy, grounding, hallucination rate, or user satisfaction. `evaluation/demo_cases.json` assumes the fictional `campus_faq.md` file was indexed. Record actual results after running; do not publish unmeasured percentages as results. Tune `MIN_RETRIEVAL_SCORE` using a balanced set of positive and negative questions.
 
 ## Example conversation (illustrative, not a recorded live response)
 
@@ -110,7 +110,7 @@ Create `data/processed` locally first if your platform needs it, and ensure the 
 
 ## Deploy a public demo (Render blueprint)
 
-A [Render Blueprint](render.yaml) is included for deployment **after pushing to GitHub**. It uses Docker with Streamlit health checks and Render's supplied `PORT`, and indexes **only the bundled fictional demo corpus**. Public uploads are disabled and a per-session demo query limit is configured. **This configuration has not been deployed or verified on a live host.** The free plan may run out of memory while loading PyTorch / Sentence Transformers; do not incur paid hosting costs without explicitly choosing a plan. Read [docs/DEPLOY.md](docs/DEPLOY.md) for prerequisites, deployment instructions, and operational caveats.
+A [Render Blueprint](render.yaml) is included for deployment **after pushing to GitHub**. It uses Docker with Streamlit health checks and Render's supplied `PORT`, and indexes **only the bundled fictional demo corpus**. Public uploads are disabled and a per-session demo query limit is configured. A Render service has been created for this repository, but successful startup and live model generation must be verified before treating it as available. The free plan may run out of memory while loading PyTorch / Sentence Transformers; do not incur paid hosting costs without explicitly choosing a plan. Read [docs/DEPLOY.md](docs/DEPLOY.md) for prerequisites, deployment instructions, and operational caveats.
 
 ## Three-phase delivery
 
@@ -118,15 +118,15 @@ A [Render Blueprint](render.yaml) is included for deployment **after pushing to 
 | --- | --- | --- |
 | 1 — MVP | Loaders, chunking, FAISS, retrieval, grounded generation, local Streamlit | Implemented in this update |
 | 2 — Quality | Citation display, modular tests, retrieval metrics, CI | Implemented baseline; expand gold dataset and human answer reviews next |
-| 3 — Packaging | Docker, Render blueprint, README, demonstration | Deployment config included; public deployment, monitoring, auth require account setup/verification |
+| 3 — Packaging | Docker, Render blueprint, README, demonstration | Render service created; health, generation, monitoring and auth require validation |
 
 Read [docs/ROADMAP.md](docs/ROADMAP.md) for tradeoffs, safeguards and next steps.
 
-## Resume/project showcase
+## Project overview and demonstration
 
 **Suggested title:** CampusGuide — Document-Grounded RAG Academic Assistant
 
-**Resume-ready bullet (accurate after you run and verify locally):**
+**Technical summary:**
 
 > Built a document-grounded RAG chatbot using Python, Streamlit, Sentence Transformers, FAISS and Groq Llama, supporting five document families, semantic retrieval, source citations, and automated ingestion/retrieval tests.
 
