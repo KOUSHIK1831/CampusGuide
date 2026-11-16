@@ -51,3 +51,51 @@ def test_question_length_guard():
     result = RAGChatbot(FakeStore(HITS), client).ask("q" * 1001)
     assert "1000" in result["answer"]
     assert client.calls == []
+
+
+class RaisingClient(FakeClient):
+    def __init__(self, error):
+        super().__init__("")
+        self.error = error
+
+    def create(self, **kwargs):
+        raise self.error
+
+
+class ProviderStatusError(Exception):
+    def __init__(self, status_code):
+        self.status_code = status_code
+        super().__init__("SECRET_PROVIDER_RESPONSE_DO_NOT_ECHO")
+
+
+def test_default_llm_model_is_supported():
+    client = FakeClient("Grounded answer [1].")
+    RAGChatbot(FakeStore(HITS), client).ask("Question?")
+    assert client.calls[0]["model"] == "openai/gpt-oss-20b"
+
+
+def test_legacy_model_is_mapped_to_supported_model():
+    client = FakeClient("Grounded answer [1].")
+    RAGChatbot(FakeStore(HITS), client, model="llama-3.1-8b-instant").ask("Question?")
+    assert client.calls[0]["model"] == "openai/gpt-oss-20b"
+
+
+def test_provider_errors_are_actionable_and_do_not_echo_raw_responses():
+    for code, expected in {401: "API key", 403: "denied", 429: "rate limit",
+                           400: "model", 404: "model", 422: "model",
+                           503: "unavailable"}.items():
+        try:
+            RAGChatbot(FakeStore(HITS), RaisingClient(ProviderStatusError(code))).ask("Question?")
+            assert False, "Expected a sanitized RuntimeError"
+        except RuntimeError as exc:
+            assert expected.lower() in str(exc).lower()
+            assert "SECRET_PROVIDER_RESPONSE_DO_NOT_ECHO" not in str(exc)
+
+
+def test_unexpected_provider_exception_does_not_leak_secret():
+    try:
+        RAGChatbot(FakeStore(HITS), RaisingClient(ValueError("SECRET_TOKEN_DO_NOT_ECHO"))).ask("Question?")
+        assert False, "Expected a sanitized RuntimeError"
+    except RuntimeError as exc:
+        assert "SECRET_TOKEN_DO_NOT_ECHO" not in str(exc)
+        assert "Groq" in str(exc)

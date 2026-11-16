@@ -14,7 +14,7 @@ from campusguide_rag.upload_workflow import (
 load_dotenv()
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 BACKEND = os.getenv("VECTOR_BACKEND", "faiss")
-LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-20b")
 MIN_SCORE = float(os.getenv("MIN_RETRIEVAL_SCORE", "0.30"))
 
 
@@ -43,7 +43,7 @@ def main() -> None:
             "Groq API key", type="password", key="byok_api_key",
             placeholder="gsk_...", help="Your key stays in this Streamlit browser session and is never saved by this app.",
         )
-        st.caption("Get a key at https://console.groq.com/keys. Key usage is billed or limited by Groq according to your account.")
+        st.caption("Get a key at https://console.groq.com/keys. Uses GPT-OSS 20B by default; Groq account limits may apply.")
         st.subheader("2. Upload documents")
         uploads = st.file_uploader(
             "Choose PDF, TXT, DOCX, Markdown or JSON files",

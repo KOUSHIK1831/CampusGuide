@@ -26,3 +26,7 @@ docker run --rm -p 8501:8501 campusguide-rag
 ```
 
 Then visit http://localhost:8501 and enter your own key in the UI. No `.env` file is needed for the web app.
+
+## Model compatibility
+
+The default Groq model is `openai/gpt-oss-20b`. An existing Render service with `LLM_MODEL=llama-3.1-8b-instant` will be mapped to the supported model in application code; update the Render environment setting as well to avoid confusion.

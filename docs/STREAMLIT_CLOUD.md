@@ -47,3 +47,11 @@ CampusGuide is a **bring-your-own-Groq-key, upload-and-chat RAG app**. The publi
 - **Groq request failed**: Check the key's validity, quota, and provider availability. Do not print or share the full key in issues.
 
 More information: [Streamlit Community Cloud deployment](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy).
+
+## Model compatibility and request failures
+
+CampusGuide defaults to `openai/gpt-oss-20b`. Groq retired `llama-3.1-8b-instant` for Free and Developer accounts on August 16, 2026. The chatbot automatically maps the old model setting to the new default.
+
+The UI differentiates rejected API keys (401), account restrictions (403), rate limits (429), unavailable models or invalid requests (400/404/422), and server or network failures without exposing the original provider response or your credentials.
+
+Check [Groq Keys](https://console.groq.com/keys) and [Active Models](https://console.groq.com/docs/models). Rotate any key you have posted in a chat, issue, or screenshot.
