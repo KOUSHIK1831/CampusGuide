@@ -104,7 +104,7 @@ class RAGChatbot:
             return {"answer": REFUSAL_TEXT, "sources": [], "retrieval_ms": retrieval_ms}
         sources = [
             {"ref": i, "source": hit["source"], "page": hit.get("page"),
-             "score": hit["score"], "excerpt": hit["text"][:400]}
+             "score": hit["score"], "excerpt": hit["text"][:1250]}
             for i, hit in enumerate(hits, 1) if i in citations
         ]
         return {"answer": answer, "sources": sources, "retrieval_ms": retrieval_ms}

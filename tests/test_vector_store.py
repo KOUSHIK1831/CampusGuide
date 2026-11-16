@@ -71,3 +71,59 @@ def test_faiss_backend_when_available(tmp_path):
     loaded = VectorStore(tmp_path, encoder=FakeEncoder(), model_name="fake-test-model", backend="faiss")
     assert loaded.load()
     assert loaded.search("books")[0]["page"] == 1
+
+
+def test_build_copies_chunk_metadata(tmp_path):
+    store = VectorStore(tmp_path, encoder=FakeEncoder(), model_name="fake", backend="numpy")
+    chunks = [{"id": "1", "source": "original.txt", "page": None, "text": "Library books"}]
+    store.build(chunks)
+    chunks[0]["source"] = "changed.txt"
+    chunks.append({"id": "2", "source": "extra.txt", "page": None, "text": "Weather"})
+    assert store.stats()["documents"] == 1
+    assert store.search("books")[0]["source"] == "original.txt"
+
+
+def test_search_keeps_old_index_with_old_metadata_during_rebuild(store):
+    """Reproduce the race reported by Copilot with two coordinated threads."""
+    import threading
+
+    old_index, old_chunks = store._snapshot
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingMatrix:
+        def __matmul__(self, vector):
+            entered.set()
+            if not release.wait(timeout=8):
+                raise TimeoutError("Search was not released")
+            return old_index @ vector
+
+    with store._lock:
+        store._snapshot = (BlockingMatrix(), old_chunks)
+
+    results = []
+    errors = []
+
+    def run_search():
+        try:
+            results.extend(store.search("advising", top_k=2, min_score=0.4))
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run_search, daemon=True)
+    worker.start()
+    try:
+        assert entered.wait(timeout=8), "Search never reached the old index"
+        store.build([{
+            "id": "replacement", "source": "replacement.txt", "page": None,
+            "text": "Weather on Jupiter",
+        }])
+    finally:
+        release.set()
+        worker.join(timeout=8)
+
+    assert not worker.is_alive()
+    assert not errors
+    assert [hit["source"] for hit in results] == ["advising.txt"]
+    assert store.stats()["documents"] == 1
+    assert store.search("Weather", min_score=0.4)[0]["source"] == "replacement.txt"
