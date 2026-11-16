@@ -1,6 +1,6 @@
-# Render Blueprint: deploys the Streamlit Docker image.
-# Deploy this only after pushing the overlay to your own GitHub repository.
-# The free instance has limited memory and ephemeral storage; see docs/DEPLOY.md.
+# Optional Render hosting for the Streamlit BYOK upload-and-chat app.
+# Streamlit Community Cloud is the primary deployment target.
+# Do not configure a shared GROQ_API_KEY for this public app.
 services:
   - type: web
     name: campusguide-rag-demo
@@ -11,23 +11,11 @@ services:
     healthCheckPath: /_stcore/health
     autoDeploy: true
     envVars:
-      - key: GROQ_API_KEY
-        sync: false
       - key: LLM_MODEL
         value: llama-3.1-8b-instant
       - key: EMBEDDING_MODEL
         value: sentence-transformers/all-MiniLM-L6-v2
       - key: VECTOR_BACKEND
         value: faiss
-      - key: DATA_RAW_PATH
-        value: data/examples
-      - key: VECTOR_STORE_PATH
-        value: data/processed
-      - key: AUTO_INGEST_ON_START
-        value: "true"
-      - key: ALLOW_UPLOADS
-        value: "false"
-      - key: MAX_DEMO_QUERIES
-        value: "10"
       - key: MIN_RETRIEVAL_SCORE
-        value: "0.30"
+        value: '0.30'

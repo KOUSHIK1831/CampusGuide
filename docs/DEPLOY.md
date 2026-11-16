@@ -1,39 +1,28 @@
-# Deploy CampusGuide on Render (Streamlit + Docker)
+# Alternative: Deploy CampusGuide on Render
 
-This repository includes a `render.yaml` blueprint. It is **deployment configuration only**, not proof of a live app. No credentials or hosting account are bundled.
+The primary hosting guide is [Streamlit Community Cloud](STREAMLIT_CLOUD.md). Render is an optional Docker-based alternative, using the included [render.yaml](../render.yaml).
 
-## Preflight
+## Bring your own Groq API key (BYOK)
 
-1. Push your reviewed update to `KOUSHIK1831/CampusGuide` (feature branch + PR, then merge into `main`). Check GitHub Actions, especially the FAISS integration test.
-2. Keep `.env` and any actual `GROQ_API_KEY` **out of Git**. Create a Groq key for your own account and add it to your Render service as a secret environment variable; never put it in `render.yaml`.
-3. Verify your rights to publish each document. The Render blueprint indexes **only `data/examples/campus_faq.md`**, a fictional example, and disables file uploads by default. The repository may contain other institutional material, which is **not indexed** in this hosted configuration.
-4. Be aware of cost and quotas: `plan: free` is configured to avoid specifying a paid plan. Free memory (~512 MB) may be **insufficient** for PyTorch/Sentence Transformers. If the service runs out of memory, choose a suitable provider/plan explicitly after checking costs, or deploy on a platform with enough free memory. This guide does not authorize a paid upgrade.
-5. There is no strong authentication or server-side global rate limiting. The optional `MAX_DEMO_QUERIES=10` is a per-session courtesy limit, **not** abuse prevention. Use a limited/quota-controlled API key; do not expose a paid key without stronger protection.
+CampusGuide no longer uses a shared Groq API key for the interactive UI. Each visitor enters their own key in a password-style sidebar field, uploads documents, processes them into a **per-session in-memory index**, and asks questions grounded in those uploads. The app does not automatically index the bundled sample documents or save uploaded documents to disk.
 
-## Deploy through the Render dashboard
+If you previously configured `GROQ_API_KEY` in an existing Render service, **remove that environment variable and revoke the previously exposed key**. The interactive app does not need it. Do not add a key to the Blueprint, repository, or Render shared environment.
 
-1. Log in to [Render](https://dashboard.render.com/). Connect your GitHub account and grant it access to the CampusGuide repository.
-2. Select **New > Blueprint** and choose `KOUSHIK1831/CampusGuide`. Render reads the root `render.yaml`.
-3. Confirm the Docker service configuration and `plan: free`, and set `GROQ_API_KEY` in the secret-input field. Do not paste the key into GitHub or chat.
-4. Deploy. Watch build and service logs. The image installs heavy machine-learning dependencies; the initial `all-MiniLM-L6-v2` download requires outbound internet access and sufficient storage/RAM.
-5. Visit the Render-provided `onrender.com` URL and confirm the Streamlit chat, a positive answer with a citation, and a refusal for an unrelated question. Your actual URL is assigned by Render: **do not guess it**.
+## Deploy
 
-The Blueprint uses `/_stcore/health` as the health-check route, binds Streamlit to `${PORT:-8501}`, sets `AUTO_INGEST_ON_START=true`, points `DATA_RAW_PATH` at the fictional `data/examples` corpus, and disables public uploads. Files under `data/processed` are ephemeral on a free service and will be recreated on restart. If the model download or index rebuild fails, check the logs and instance memory. Never claim a successful deployment without checking the URL and logs.
+1. Connect your GitHub account to [Render](https://dashboard.render.com/).
+2. Create a Blueprint from `KOUSHIK1831/CampusGuide`, branch `main`, reading the root `render.yaml`.
+3. Confirm it uses the `free` plan, Docker runtime, and the `/_stcore/health` route. Do not select a paid plan without evaluating the cost.
+4. Watch the Docker build, runtime logs, and health status. Streamlit binds to the `PORT` provided by Render.
+5. Open the **actual Render-assigned URL**. Supply your own Groq key in the sidebar, upload a text-based document, click **Process uploaded documents**, ask a grounded question, and inspect its source citations.
 
-## Local Docker smoke test
+Limitations: Render's free plan may lack enough RAM for PyTorch and Sentence Transformers; filesystem state is ephemeral; uploads are limited to ten files (15 MB per file / 40 MB combined). The app has no global anti-abuse controls or authentication. Avoid uploading confidential data; document excerpts are sent to Groq during answer generation.
+
+For local Docker testing, use:
 
 ```bash
 docker build -t campusguide-rag .
-docker run --rm --env-file .env -p 8501:8501 \
-  -e DATA_RAW_PATH=data/examples -e AUTO_INGEST_ON_START=true \
-  -e ALLOW_UPLOADS=false -e MAX_DEMO_QUERIES=10 campusguide-rag
+docker run --rm -p 8501:8501 campusguide-rag
 ```
 
-Then open `http://localhost:8501` and use the example prompt from the README.
-
-## Deployment limitations
-
-- A free service can restart or sleep; the FAISS index is rebuilt from the bundled fictional corpus.
-- Session query limits can be bypassed by starting another session. Production requires authentication, true per-client quotas, logging and monitoring, and secret rotation.
-- Avoid presenting this demo as production-secure or as a tool authorized to interpret official university policies.
-- If you later enable uploading, add access control, data retention policies, quotas, malware scanning, and storage isolation first.
+Then visit http://localhost:8501 and enter your own key in the UI. No `.env` file is needed for the web app.

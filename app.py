@@ -1,120 +1,86 @@
-"""Streamlit entry point for the CampusGuide RAG application."""
+"""CampusGuide: per-session document Q&A with a bring-your-own Groq API key."""
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
 
-from campusguide_rag import (
-    RAGChatbot, SUPPORTED_EXTENSIONS, VectorStore,
-    chunk_documents, load_directory,
+from campusguide_rag import RAGChatbot, VectorStore
+from campusguide_rag.upload_workflow import (
+    MAX_UPLOAD_FILES, prepare_uploaded_documents, upload_fingerprint,
 )
-from campusguide_rag.ingestion import MAX_FILE_BYTES
 
 load_dotenv()
-RAW_DIR = Path(os.getenv("DATA_RAW_PATH", "data/examples"))
-INDEX_DIR = Path(os.getenv("VECTOR_STORE_PATH", "data/processed"))
-BACKEND = os.getenv("VECTOR_BACKEND", "faiss")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+BACKEND = os.getenv("VECTOR_BACKEND", "faiss")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+MIN_SCORE = float(os.getenv("MIN_RETRIEVAL_SCORE", "0.30"))
 
 
-@st.cache_resource(show_spinner="Loading the local vector index...")
-def get_store() -> VectorStore:
-    store = VectorStore(INDEX_DIR, model_name=EMBEDDING_MODEL, backend=BACKEND)
-    try:
-        loaded = store.load()
-    except (OSError, ValueError, ImportError) as exc:
-        st.warning(f"Stored index cannot be loaded ({exc}). Rebuild it from source documents.")
-        loaded = False
-    # Hosted demo uses only bundled fictional content (data/examples); uploads are disabled.
-    if not loaded and os.getenv("AUTO_INGEST_ON_START", "true").lower() == "true":
-        try:
-            rebuild(store)
-        except (ValueError, OSError, ImportError) as exc:
-            st.warning(f"Automatic demo indexing failed: {exc}")
-    return store
+@st.cache_resource(show_spinner="Loading the embedding model...")
+def get_embedding_model(model_name: str):
+    """Share only model weights: never cache an index, uploaded text, or API key."""
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer(model_name, device="cpu")
 
 
-def rebuild(store: VectorStore) -> tuple[int, int, list[str]]:
-    units, errors = load_directory(RAW_DIR)
-    chunks = chunk_documents(units)
-    if not chunks:
-        raise ValueError("No extractable documents. Add TXT, MD, JSON, DOCX or text-based PDF files.")
-    store.build(chunks)
-    store.save()
-    return len({c["source"] for c in chunks}), len(chunks), errors
-
-
-def save_uploads(files: list) -> int:
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    saved = 0
-    for item in files:
-        # Both Linux and Windows separators are stripped; only a filename is stored.
-        name = item.name.replace("\\", "/").rsplit("/", 1)[-1]
-        if not name or Path(name).suffix.lower() not in SUPPORTED_EXTENSIONS:
-            st.warning(f"Skipped unsupported file: {name}")
-            continue
-        data = item.getvalue()
-        if len(data) > MAX_FILE_BYTES:
-            st.warning(f"Skipped {name}: exceeds 15 MB limit")
-            continue
-        (RAW_DIR / name).write_bytes(data)
-        saved += 1
-    return saved
+def clear_my_session() -> None:
+    """Forget one visitor's API key, uploaded widget, indexed corpus, and chat."""
+    for key in ("byok_api_key", "uploaded_documents", "document_store",
+                "upload_signature", "chat_history"):
+        st.session_state.pop(key, None)
 
 
 def main() -> None:
-    st.set_page_config(page_title="CampusGuide | Document RAG", page_icon="🎓", layout="wide")
-    st.title("🎓 CampusGuide")
-    st.caption("Ask questions about locally indexed documents. Answers include retrieval citations, not guarantees of correctness.")
-    store = get_store()
-    with st.sidebar:
-        st.header("Knowledge base")
-        uploads_enabled = os.getenv("ALLOW_UPLOADS", "false").lower() == "true"
-        uploads = None
-        if uploads_enabled:
-            uploads = st.file_uploader(
-                "Add documents", type=["pdf", "txt", "docx", "md", "markdown", "json"],
-                accept_multiple_files=True,
-                help="Text-based PDFs only; maximum 15 MB per file. Duplicate filenames are replaced.",
-            )
-        else:
-            st.info("Hosted demo: uploads are disabled; only fictional sample documents are indexed.")
-        if uploads_enabled and st.button("Save uploads and rebuild", type="primary", disabled=not uploads):
-            try:
-                saved = save_uploads(uploads)
-                if saved:
-                    with st.spinner("Embedding all documents..."):
-                        docs, chunks, errors = rebuild(store)
-                    st.success(f"Indexed {docs} document(s), {chunks} chunks")
-                    for error in errors:
-                        st.warning(error)
-                    st.session_state["chat_history"] = []
-                else:
-                    st.warning("No supported documents were uploaded")
-            except (ValueError, OSError, ImportError) as exc:
-                st.error(f"Could not rebuild: {exc}")
-        if uploads_enabled and st.button("Rebuild index from data/raw"):
-            try:
-                with st.spinner("Embedding corpus..."):
-                    docs, chunks, errors = rebuild(store)
-                st.success(f"Indexed {docs} document(s), {chunks} chunks")
-                for error in errors:
-                    st.warning(error)
-                st.session_state["chat_history"] = []
-            except (ValueError, OSError, ImportError) as exc:
-                st.error(f"Could not rebuild: {exc}")
-        stats = store.stats()
-        st.metric("Indexed documents", stats["documents"])
-        st.metric("Indexed chunks", stats["chunks"])
-        st.caption(f"Vector backend: {stats['backend']}")
-        st.caption("This demo has no authentication or document-level authorization. Use non-sensitive documents only.")
+    st.set_page_config(page_title="CampusGuide | Chat with Documents", page_icon="📚", layout="wide")
+    st.title("📚 CampusGuide — Chat with your documents")
+    st.caption("Upload files, bring your own Groq API key, and ask questions with source citations.")
 
-    if not store.ready:
-        st.info("Index a document using the sidebar or run `python scripts/ingest.py` first.")
-        return
+    with st.sidebar:
+        st.subheader("1. Your Groq API key")
+        api_key = st.text_input(
+            "Groq API key", type="password", key="byok_api_key",
+            placeholder="gsk_...", help="Your key stays in this Streamlit browser session and is never saved by this app.",
+        )
+        st.caption("Get a key at https://console.groq.com/keys. Key usage is billed or limited by Groq according to your account.")
+        st.subheader("2. Upload documents")
+        uploads = st.file_uploader(
+            "Choose PDF, TXT, DOCX, Markdown or JSON files",
+            type=["pdf", "txt", "docx", "md", "markdown", "json"],
+            accept_multiple_files=True, key="uploaded_documents",
+            help=f"Up to {MAX_UPLOAD_FILES} files; 15 MB per file, 40 MB combined. PDFs need extractable text.",
+        )
+        selected = [(item.name, item.getvalue()) for item in (uploads or [])]
+        current_signature = upload_fingerprint(selected)
+        if current_signature != st.session_state.get("upload_signature"):
+            # Never show answers or sources from documents that are no longer selected.
+            st.session_state.pop("document_store", None)
+            st.session_state.pop("upload_signature", None)
+            st.session_state["chat_history"] = []
+        if st.button("Process uploaded documents", type="primary", disabled=not selected, use_container_width=True):
+            try:
+                with st.spinner("Extracting and indexing your documents..."):
+                    chunks, doc_count = prepare_uploaded_documents(selected)
+                    store = VectorStore(
+                        model_name=EMBEDDING_MODEL,
+                        encoder=get_embedding_model(EMBEDDING_MODEL),
+                        backend=BACKEND,
+                    )
+                    store.build(chunks)
+                st.session_state["document_store"] = store
+                st.session_state["upload_signature"] = current_signature
+                st.session_state["chat_history"] = []
+                st.success(f"Ready: {doc_count} document(s), {len(chunks)} chunks.")
+            except (ValueError, OSError, RuntimeError, ImportError) as exc:
+                st.error(f"Could not process the documents: {exc}")
+        store = st.session_state.get("document_store")
+        if store and store.ready:
+            stats = store.stats()
+            st.metric("Indexed documents", stats["documents"])
+            st.metric("Indexed chunks", stats["chunks"])
+        st.button("Clear my session", on_click=clear_my_session, use_container_width=True)
+        st.caption("Uploaded content and its index are kept in this session's memory, not written by the app to disk. Avoid sensitive documents. Relevant excerpts are sent to Groq when you ask a question.")
 
     if "chat_history" not in st.session_state:
         st.session_state["chat_history"] = []
@@ -122,29 +88,41 @@ def main() -> None:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             for source in message.get("sources", []):
-                with st.expander(f"[{source['ref']}] {source['source']}" + (f" · page {source['page']}" if source['page'] else "")):
+                label = f"[{source['ref']}] {source['source']}"
+                if source.get("page"):
+                    label += f" · page {source['page']}"
+                with st.expander(label):
                     st.caption(f"Similarity: {source['score']:.3f}")
                     st.code(source["excerpt"], language=None)
 
-    # Session quota reduces accidental usage; this is NOT a global security/rate-limit control.
-    max_demo_queries = int(os.getenv("MAX_DEMO_QUERIES", "10"))
-    used_queries = sum(m["role"] == "user" for m in st.session_state["chat_history"])
-    quota_reached = max_demo_queries > 0 and used_queries >= max_demo_queries
-    if quota_reached:
-        st.info("Demo session query limit reached. Start a new browser session to try again.")
-    prompt = st.chat_input("What do the documents say about ...?", disabled=quota_reached)
-    if prompt:
-        st.session_state["chat_history"].append({"role": "user", "content": prompt})
+    store = st.session_state.get("document_store")
+    if not store or not store.ready:
+        st.info("Start by uploading documents and clicking **Process uploaded documents** in the sidebar.")
+    if not api_key.strip():
+        st.info("Enter your own Groq API key in the sidebar to enable answering questions.")
+    question = st.chat_input(
+        "Ask a question about your uploaded files...",
+        disabled=not store or not store.ready or not api_key.strip(),
+    )
+    if question:
+        st.session_state["chat_history"].append({"role": "user", "content": question})
         try:
-            with st.spinner("Retrieving evidence and generating answer..."):
-                bot = RAGChatbot(store, model=os.getenv("LLM_MODEL", "llama-3.1-8b-instant"),
-                                 min_score=float(os.getenv("MIN_RETRIEVAL_SCORE", "0.30")))
-                response = bot.ask(prompt)
+            from groq import Groq
+            # Never place the user's key in os.environ, cache_resource, disk, or logs.
+            # Create a client for the current user's request only.
+            with st.spinner("Searching the uploaded documents and generating an answer..."):
+                bot = RAGChatbot(
+                    store, llm_client=Groq(api_key=api_key.strip()),
+                    model=LLM_MODEL, min_score=MIN_SCORE,
+                )
+                result = bot.ask(question)
             st.session_state["chat_history"].append({
-                "role": "assistant", "content": response["answer"], "sources": response["sources"]
+                "role": "assistant", "content": result["answer"], "sources": result["sources"],
             })
         except (RuntimeError, ValueError) as exc:
-            st.session_state["chat_history"].append({"role": "assistant", "content": str(exc), "sources": []})
+            st.session_state["chat_history"].append({
+                "role": "assistant", "content": str(exc), "sources": [],
+            })
         st.rerun()
 
 
