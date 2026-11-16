@@ -2,245 +2,102 @@
 
 # CampusGuide
 
-**Chat with your documents using retrieval-augmented generation (RAG).**
+**Ask questions about your documents with retrieval-augmented generation and inspect source-cited answers.**
 
-Upload PDF, DOCX, TXT, Markdown or JSON files. Bring your own Groq API key, ask questions, and inspect source-cited answers.
+[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![CI](https://github.com/KOUSHIK1831/CampusGuide/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/KOUSHIK1831/CampusGuide/actions/workflows/tests.yml)
 
-[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit)](https://streamlit.io/)
-[![CI](https://github.com/KOUSHIK1831/CampusGuide/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/KOUSHIK1831/CampusGuide/actions)
-[![License](https://img.shields.io/github/license/KOUSHIK1831/CampusGuide)](LICENSE)
-[![Last commit](https://img.shields.io/github/last-commit/KOUSHIK1831/CampusGuide)](https://github.com/KOUSHIK1831/CampusGuide/commits/main)
-[![Repo size](https://img.shields.io/github/repo-size/KOUSHIK1831/CampusGuide)](https://github.com/KOUSHIK1831/CampusGuide)
-
-[Quick start](#quick-start) · [Architecture](#how-it-works) · [Deployment](#deployment) · [Issues](https://github.com/KOUSHIK1831/CampusGuide/issues)
+[Features](#features) · [Quick start](#quick-start) · [Architecture](#architecture) · [Deploy](#deployment)
 
 </div>
 
-> [!IMPORTANT]
-> **Bring your own key (BYOK):** Every visitor enters a Groq API key in the app's password field. No shared Groq key is needed on the hosting platform. Never commit, post, or screenshot a real API key.
-
-## Overview
-
-CampusGuide is a Python/Streamlit app for answering questions about **your own uploaded documents**. It extracts text, builds a session-local FAISS index, retrieves relevant passages, and sends those excerpts to a Groq-hosted language model for a cited answer. Files, chat history and the vector index belong to the current Streamlit session; no account or external vector database is needed. The project is intended for learning, demonstrations and document exploration—not high-stakes document processing.
-
-**Demo:** [TODO: Add a verified Streamlit Community Cloud URL]. The existing GitHub repository is [KOUSHIK1831/CampusGuide](https://github.com/KOUSHIK1831/CampusGuide).
-
-## Contents
-
-- [Features](#features)
-- [Quick start](#quick-start)
-- [Using the app](#using-the-app)
-- [How it works](#how-it-works)
-- [Repository layout](#repository-layout)
-- [Configuration](#configuration)
-- [Tests and evaluation](#tests-and-evaluation)
-- [Deployment](#deployment)
-- [Troubleshooting](#troubleshooting)
-- [Limitations and roadmap](#limitations-and-roadmap)
+CampusGuide is a Streamlit document-question-answering application. Upload your own files, provide a **Groq API key**, and explore answers grounded in retrieved passages. Document indexes and conversation history are kept in the active Streamlit session, not a shared database.
 
 ## Features
 
-- **Bring your own Groq API key** through a password-masked input; the app does not persist it to disk.
-- **Upload and chat:** PDF (selectable text), DOCX, TXT, Markdown and JSON.
-- **Batch validation:** up to 10 files, 15 MB per file, 40 MB combined; duplicate filenames are rejected.
-- **Source-cited answers** with filenames, PDF page references and expandable supporting excerpts.
-- **Session-isolated search:** one in-memory vector index per Streamlit visitor; the pretrained embedding model is the only globally cached resource.
-- **Grounding safeguards:** context-only prompt, retrieval similarity threshold, citation-number checking and no-evidence responses.
-- **Local tooling:** optional corpus-indexing CLI, retrieval-evaluation CLI, pytest tests and GitHub Actions.
-- **Safe provider errors:** distinct messages for authentication, permission, quota, unavailable-model and network errors without exposing provider payloads.
+- **Bring your own key:** Enter your Groq key in a password-masked sidebar field.
+- **Multi-format uploads:** Text-based PDF, DOCX, TXT, Markdown, and JSON.
+- **Source citations:** Inspect filenames, PDF page numbers, and matching excerpts.
+- **Session isolation:** Each visitor gets an in-memory **FAISS** document index.
+- **Grounding checks:** Similarity thresholds and citation validation reject unsupported responses.
+- **Document controls:** Up to 10 files; 15 MB per file and 40 MB combined.
+- **Testing and evaluation:** pytest tests, retrieval cases, and GitHub Actions.
+
+> [!IMPORTANT]
+> Never publish a Groq API key. Uploaded files are processed by the hosting service, and retrieved excerpts are sent to Groq for generation. Do not upload confidential or regulated documents.
 
 ## Quick start
 
-Requires **Python 3.12+**, Git, internet access for the first embedding-model download, and your own [Groq API key](https://console.groq.com/keys).
+**Requirements:** Python 3.12+, internet access to download the embedding model on first use, and a [Groq API key](https://console.groq.com/keys).
 
 ```bash
 git clone https://github.com/KOUSHIK1831/CampusGuide.git
 cd CampusGuide
 python -m venv .venv
-```
-
-Activate the virtual environment:
-
-- **macOS/Linux:** `source .venv/bin/activate`
-- **Windows PowerShell:** `.\.venv\Scripts\Activate.ps1`
-
-```bash
+# Linux/macOS: source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Open **http://localhost:8501**. You do **not** need to create a `.env` file to use the interactive application.
+Open **http://localhost:8501**. A `.env` file is not required for the interactive app; configuration overrides and local CLI tools can use [`.env.example`](.env.example).
 
-## Using the app
+## Using CampusGuide
 
-1. In the sidebar, enter your **own Groq API key** (not in GitHub, Streamlit Secrets or chat).
-2. Upload one or more documents and select **Process uploaded documents**.
-3. Wait until the sidebar shows the number of indexed documents and chunks.
-4. Ask questions in the chat. Expand citation labels to inspect the original supporting excerpts.
-5. Choose **Clear my session** to clear the key, selected files, index and conversation.
+1. Enter your own Groq API key in the sidebar.
+2. Upload files, then select **Process uploaded documents**.
+3. Ask a question and inspect the source excerpts accompanying the answer.
+4. Choose **Clear my session** to clear the indexed files, API key, and chat history.
 
-**Example:** Upload [`data/examples/campus_faq.md`](data/examples/campus_faq.md), which contains deliberately fictional policies, then ask:
+Try [`data/examples/campus_faq.md`](data/examples/campus_faq.md) to explore the interface with deliberately fictional sample policies. Cite and verify source documents rather than trusting model answers automatically.
 
-```text
-How many library books can students borrow?
-```
-
-An illustrative response is:
-
-```text
-Students may borrow up to four library books at once [1].
-```
-
-The actual model wording can vary. If the files contain no relevant information—for example, if you ask **“Tell me about Koushik”** and none of the uploads mention Koushik—the expected behavior is a refusal, not an invented biography. Retrieval is imperfect; verify any response against its cited passages.
-
-| Supported upload | Notes |
-| --- | --- |
-| `.pdf` | Must contain extractable text; scanned PDFs require OCR elsewhere |
-| `.docx` | Paragraphs and tables |
-| `.txt`, `.md`, `.markdown` | UTF-8 text |
-| `.json` | Objects, lists or `{"documents": [...]}` |
-
-Changing the selected files invalidates the previous index and chat history. Re-process the selection before continuing.
-
-## How it works
+## Architecture
 
 ```mermaid
 flowchart TD
-    A["Upload documents"] --> B["Validate size, format, and filename"]
-    B --> C["Extract text with source/page metadata"]
-    C --> D["Chunk text: 900 characters, 120 overlap"]
-    D --> E["Embed with all-MiniLM-L6-v2"]
-    E --> F["Build in-memory FAISS IndexFlatIP"]
-    G["User question"] --> H["Embed question"]
-    F --> I["Top-k vector retrieval"]
-    H --> I
-    I --> J{"Chunks above threshold?"}
-    J -->|No| K["No-information response"]
-    J -->|Yes| L["Send retrieved excerpts to Groq"]
-    L --> M{"Valid citation numbers?"}
-    M -->|No| K
-    M -->|Yes| N["Answer + cited excerpts"]
+    A[Upload files] --> B[Validate and extract text]
+    B --> C[Chunk passages and retain source metadata]
+    C --> D[Sentence Transformers embeddings]
+    D --> E[Session-local FAISS index]
+    F[User question] --> G[Vector retrieval]
+    E --> G
+    G --> H{Relevant excerpts?}
+    H -->|No| I[No-information response]
+    H -->|Yes| J[Groq LLM with context]
+    J --> K{Valid source citations?}
+    K -->|No| I
+    K -->|Yes| L[Answer and citations]
 ```
 
-| Component | Responsibility |
-| --- | --- |
-| [`app.py`](app.py) | Streamlit UI, BYOK input, upload selection, chat and per-session state |
-| [`upload_workflow.py`](campusguide_rag/upload_workflow.py) | File limits, duplicate detection, upload fingerprints and chunk preparation |
-| [`ingestion.py`](campusguide_rag/ingestion.py) | In-memory text extraction, page metadata and overlapping chunks |
-| [`vector_store.py`](campusguide_rag/vector_store.py) | Normalized embeddings, FAISS exact inner-product search and optional NumPy backend |
-| [`chatbot.py`](campusguide_rag/chatbot.py) | Groq request, evidence-only prompt, refusal handling, citation validation and safe error reporting |
-
-CampusGuide uses pretrained Sentence Transformers for embeddings; it **does not train or fine-tune a model**. The default embedding model is `sentence-transformers/all-MiniLM-L6-v2`. The current Groq default is **`openai/gpt-oss-20b`**. Groq retired the former `llama-3.1-8b-instant` default for Free/Developer accounts in August 2026; the code automatically maps that old setting to the new model.
-
-> [!NOTE]
-> Citations check **which excerpts were referenced**, not whether every generated claim is entailed by an excerpt. Review the source text before relying on an answer.
-
-## Repository layout
-
-```text
-CampusGuide/
-├── app.py                      # Active web app
-├── campusguide_rag/
-│   ├── ingestion.py            # PDF/DOCX/TXT/MD/JSON parsing and chunking
-│   ├── upload_workflow.py      # Validation and in-memory uploads
-│   ├── vector_store.py         # FAISS/NumPy search and CLI persistence
-│   └── chatbot.py              # Groq generation and citations
-├── tests/                      # Unit and FAISS integration tests
-├── scripts/
-│   ├── ingest.py               # Optional disk-backed corpus indexing
-│   └── evaluate.py             # Offline retrieval evaluation
-├── evaluation/demo_cases.json  # Example retrieval questions
-├── data/examples/              # Fictional demonstration document
-├── data/raw/                   # Legacy local corpus; not loaded by the web UI
-├── docs/                       # Hosting, design and roadmap notes
-├── .streamlit/config.toml      # Streamlit configuration
-├── requirements.txt            # Python runtime dependencies
-├── packages.txt                # Linux system dependency for cloud hosting
-├── Dockerfile                  # Optional Docker image
-└── render.yaml                 # Optional Render configuration
-```
-
-The older folders `ingestion/`, `embeddings/`, `retriever/`, `llm/`, `validation/` and `ui/` are retained experiments, **not** the active web pipeline.
+The default embedding model is `sentence-transformers/all-MiniLM-L6-v2`; the default Groq model is `openai/gpt-oss-20b`. A valid citation demonstrates which excerpt was used, **not** that the generated claim is necessarily correct.
 
 ## Configuration
 
-Interactive visitors provide their Groq key **inside the UI**; they should not put it in a shared hosting environment.
+For CLI workflows or local model overrides, copy `.env.example` to `.env` and review:
 
-| Name | Default | Use |
-| --- | --- | --- |
-| `LLM_MODEL` | `openai/gpt-oss-20b` | Groq generation model |
-| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model |
-| `VECTOR_BACKEND` | `faiss` | `faiss` or `numpy` |
-| `MIN_RETRIEVAL_SCORE` | `0.30` | Minimum cosine similarity |
-| `DATA_RAW_PATH` | `data/raw` | Local CLI input only |
-| `VECTOR_STORE_PATH` | `data/processed` | Local CLI output only |
+| Variable | Use |
+| --- | --- |
+| `LLM_MODEL` | Groq model name |
+| `EMBEDDING_MODEL` | Sentence Transformer model |
+| `VECTOR_BACKEND` | Vector backend (default FAISS) |
+| `MIN_RETRIEVAL_SCORE` | Relevance cutoff |
+| `DATA_RAW_PATH`, `VECTOR_STORE_PATH` | Optional local CLI data directories |
 
-The interactive app builds its index **in memory** and does not use the CLI's disk index.
+The interactive UI accepts the Groq key directly and does not require a shared hosting-provider key.
 
-## Tests and evaluation
+## Testing
 
 ```bash
-python -m pip install "pytest>=8,<10"
+python -m pip install pytest
 python -m pytest -q
 ```
 
-The suite tests document parsing, upload validation, vector retrieval, source citations, no-evidence behavior and provider-error handling. Tests use fakes for external model calls; passing tests **do not prove live Groq connectivity**.
-
-For optional disk-based evaluation using only the fictional example:
-
-```bash
-python scripts/ingest.py --source data/examples --output data/processed
-python scripts/evaluate.py --cases evaluation/demo_cases.json --k 4
-```
-
-The evaluator reports source hit@k and an empty-retrieval rate for negative cases. It does **not** measure answer truthfulness or hallucination rates. **[TODO: Publish measured evaluation results and a verified CI run for the current commit.]**
+The repository also provides [evaluation cases](evaluation/), [deployment notes](docs/DEPLOY.md), and a [roadmap](docs/ROADMAP.md). Tests validate project behavior but do not guarantee the factual correctness of arbitrary AI answers.
 
 ## Deployment
 
-### Streamlit Community Cloud (preferred)
+See [Streamlit Cloud setup](docs/STREAMLIT_CLOUD.md) or [deployment guide](docs/DEPLOY.md). A [Dockerfile](Dockerfile) and [Render configuration](render.yaml) are also included.
 
-1. Sign in at [share.streamlit.io](https://share.streamlit.io/) with GitHub.
-2. Select **Create app** and choose repository `KOUSHIK1831/CampusGuide`, branch `main`, entry point `app.py` and **Python 3.12**.
-3. Select **Deploy**, then test the upload → processing → question → cited-answer workflow.
-4. Copy the **actual** `*.streamlit.app` address into the demo link at the top of this README.
-
-**No shared Groq key or Streamlit Secrets entry is required.** Every visitor enters their own key. See [Streamlit deployment instructions](docs/STREAMLIT_CLOUD.md).
-
-### Docker (optional)
-
-```bash
-docker build -t campusguide .
-docker run --rm -p 8501:8501 campusguide
-```
-
-The [Render guide](docs/DEPLOY.md) describes an alternative Docker deployment.
-
-## Troubleshooting
-
-| Symptom | What to check |
-| --- | --- |
-| **Groq rejected the API key (401)** | Generate a fresh key in [Groq Console](https://console.groq.com/keys). Never paste it in an issue or public chat. |
-| **Permission denied (403)** | Account access or model eligibility. Check Groq account settings. |
-| **Rate limit or quota (429)** | Review Groq usage and try again after your quota resets. |
-| **Request rejected (400/404/422)** | Verify `openai/gpt-oss-20b` appears in [supported models](https://console.groq.com/docs/models). Update outdated hosting environment variables. |
-| **Network or server failure** | Check connectivity and [Groq status](https://status.groq.com/). |
-| **Chat box disabled** | Enter a key, select documents and click **Process uploaded documents**. |
-| **No relevant answer** | Check that the answer exists in selectable document text; inspect citations and test a more specific question. |
-| **Scanned PDF / memory error** | Use searchable PDFs or smaller files; Streamlit Cloud resources are limited. |
-
-The application intentionally does **not** show raw provider responses in errors because they may contain sensitive information.
-
-## Limitations and roadmap
-
-- Uploads and indexes live only in the current Streamlit session; app restarts can remove them.
-- Files pass through the hosting platform, and **retrieved excerpts are sent to Groq**. Do not upload confidential or regulated material.
-- No OCR, user login, persistent workspace, global rate limiter or factual-entailment validator is implemented.
-- Model output can be inaccurate even with valid-looking citations.
-- Planned work includes OCR, richer retrieval evaluation, reranking, better source highlighting and operational security hardening. See [roadmap](docs/ROADMAP.md).
-
----
-
-Maintained by **Banuri Koushik Reddy** · [GitHub](https://github.com/KOUSHIK1831)
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidance and [LICENSE](LICENSE) for licensing terms (AGPLv3).
+> [!NOTE]
+> Session data is temporary. Scanned PDFs without extractable text need OCR elsewhere. There is no user-account system, persistent shared knowledge base, or production security certification.
