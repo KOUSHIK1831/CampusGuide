@@ -95,6 +95,60 @@ python -m pytest -q
 
 The repository also provides [evaluation cases](evaluation/), [deployment notes](docs/DEPLOY.md), and a [roadmap](docs/ROADMAP.md). Tests validate project behavior but do not guarantee the factual correctness of arbitrary AI answers.
 
+## Supported input and index behavior
+
+| Format | How it is processed |
+| --- | --- |
+| PDF | Extractable text with page metadata; scanned-only pages need OCR elsewhere |
+| DOCX | Text from supported document content |
+| TXT, Markdown | Text content with source filename |
+| JSON | Structured text content supported by the ingestion loader |
+
+Uploads are validated as a **batch**: unsupported extensions, duplicate
+filenames, oversize files, and empty extracted text are rejected. A change
+in selected files invalidates the previous document index and chat history,
+preventing responses from an outdated selection.
+
+The embedding step normalizes vectors and stores them in a per-session
+FAISS `IndexFlatIP` index. Query results are filtered by a relevance
+threshold; the generation step uses retrieved excerpts with their
+source metadata. Citation validation rejects answers with missing
+or invalid source references, but cannot prove factual correctness.
+
+## Retrieval evaluation and maintenance
+
+The repository includes a command-line workflow for indexing a local
+corpus and evaluating which source documents the retriever returns.
+This is **retrieval evaluation**, not an accuracy score for generated answers.
+
+```bash
+python scripts/ingest.py
+python scripts/evaluate.py --cases evaluation/demo_cases.json
+python -m pytest -q
+```
+
+The evaluator reports source hit rates for questions with known expected
+sources and the rate of empty retrievals for negative examples. It does
+not measure whether an LLM's final wording is correct. See
+[`evaluation/`](evaluation/) and [`scripts/evaluate.py`](scripts/evaluate.py).
+
+## Common problems
+
+| Problem | Suggested check |
+| --- | --- |
+| Nothing to search | Upload a supported, text-extractable document and process it |
+| No answer despite an upload | Check whether the relevant passage was extracted and retrieved |
+| API authorization error | Check the Groq key entered in the sidebar |
+| Model unavailable or rate limited | Verify your account's available Groq models and quota |
+| PDF gives empty text | Use a searchable PDF rather than a scanned image-only file |
+| Chat resets after editing uploads | This intentionally prevents stale cross-document answers |
+| First run loads slowly | The sentence-transformer model may need to download |
+
+> [!TIP]
+> For meaningful retrieval evaluation, keep examples with both
+> **answerable and unanswerable** questions, and inspect the cited
+> passages rather than relying on fluent model responses alone.
+
 ## Deployment
 
 See [Streamlit Cloud setup](docs/STREAMLIT_CLOUD.md) or [deployment guide](docs/DEPLOY.md). A [Dockerfile](Dockerfile) and [Render configuration](render.yaml) are also included.
