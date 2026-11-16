@@ -97,7 +97,7 @@ Persistence uses JSON and FAISS's native index format, **not pickle**. Rebuild i
 
 ## Configuration
 
-Edit `.env` using the keys listed in `.env.example`: `GROQ_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`, `VECTOR_BACKEND`, `VECTOR_STORE_PATH`, `DATA_RAW_PATH`, `MIN_RETRIEVAL_SCORE`. Never commit secrets. If using `uv`, regenerate the repository's older lockfile with `uv lock` after updating dependencies; the documented install path uses pip.
+Edit `.env` using the keys listed in `.env.example`: `GROQ_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`, `VECTOR_BACKEND`, `VECTOR_STORE_PATH`, `DATA_RAW_PATH`, `MIN_RETRIEVAL_SCORE`. Never commit secrets. The outdated `uv.lock` was removed because Streamlit Cloud prioritizes it over the active root `requirements.txt`. Only regenerate it if intentionally maintaining a synchronized lockfile.
 
 ## Docker (local demonstration)
 
@@ -108,9 +108,15 @@ docker run --rm -p 8501:8501 --env-file .env -v "$(pwd)/data:/app/data" campusgu
 
 Create `data/processed` locally first if your platform needs it, and ensure the mount is writable by the container user (UID 10001). After starting, upload documents or use the sidebar's **Rebuild index** button. The first embedding-model download may take time. Docker runs **locally**; no hosted deployment is claimed.
 
-## Deploy a public demo (Render blueprint)
+## Deploy on Streamlit Community Cloud (primary)
 
-A [Render Blueprint](render.yaml) is included for deployment **after pushing to GitHub**. It uses Docker with Streamlit health checks and Render's supplied `PORT`, and indexes **only the bundled fictional demo corpus**. Public uploads are disabled and a per-session demo query limit is configured. A Render service has been created for this repository, but successful startup and live model generation must be verified before treating it as available. The free plan may run out of memory while loading PyTorch / Sentence Transformers; do not incur paid hosting costs without explicitly choosing a plan. Read [docs/DEPLOY.md](docs/DEPLOY.md) for prerequisites, deployment instructions, and operational caveats.
+CampusGuide is prepared for **Streamlit Community Cloud**. Deploy from `KOUSHIK1831/CampusGuide`, branch `main`, entrypoint `app.py`, with **Python 3.12**. Add a fresh `GROQ_API_KEY` under Streamlit Cloud's **Advanced settings → Secrets**. See [docs/STREAMLIT_CLOUD.md](docs/STREAMLIT_CLOUD.md) for setup, security guidance, troubleshooting, and live-app verification.
+
+**Pushing to GitHub does not provision a Streamlit Cloud app.** The repository owner must create it at https://share.streamlit.io/ and obtain the actual assigned `*.streamlit.app` URL. Do not publish an unverified address.
+
+Without local overrides, the hosted demo automatically indexes **only fictional** content from `data/examples`, disables uploads, and limits each browser session to 10 questions. For local document uploads, copy `.env.example` to `.env`. Never commit `.streamlit/secrets.toml`.
+
+The optional [Render deployment guide](docs/DEPLOY.md) and [Render Blueprint](render.yaml) remain as alternate hosting options.
 
 ## Three-phase delivery
 
@@ -118,7 +124,7 @@ A [Render Blueprint](render.yaml) is included for deployment **after pushing to 
 | --- | --- | --- |
 | 1 — MVP | Loaders, chunking, FAISS, retrieval, grounded generation, local Streamlit | Implemented in this update |
 | 2 — Quality | Citation display, modular tests, retrieval metrics, CI | Implemented baseline; expand gold dataset and human answer reviews next |
-| 3 — Packaging | Docker, Render blueprint, README, demonstration | Render service created; health, generation, monitoring and auth require validation |
+| 3 — Packaging | Docker, Streamlit Cloud settings, README, demonstration | Source prepared; Streamlit deployment and live-generation tests remain |
 
 Read [docs/ROADMAP.md](docs/ROADMAP.md) for tradeoffs, safeguards and next steps.
 

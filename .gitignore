@@ -13,3 +13,4 @@ data/processed/
 .vscode/
 .idea/
 *.log
+.streamlit/secrets.toml

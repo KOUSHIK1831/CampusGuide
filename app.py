@@ -14,7 +14,7 @@ from campusguide_rag import (
 from campusguide_rag.ingestion import MAX_FILE_BYTES
 
 load_dotenv()
-RAW_DIR = Path(os.getenv("DATA_RAW_PATH", "data/raw"))
+RAW_DIR = Path(os.getenv("DATA_RAW_PATH", "data/examples"))
 INDEX_DIR = Path(os.getenv("VECTOR_STORE_PATH", "data/processed"))
 BACKEND = os.getenv("VECTOR_BACKEND", "faiss")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
@@ -29,7 +29,7 @@ def get_store() -> VectorStore:
         st.warning(f"Stored index cannot be loaded ({exc}). Rebuild it from source documents.")
         loaded = False
     # Hosted demo uses only bundled fictional content (data/examples); uploads are disabled.
-    if not loaded and os.getenv("AUTO_INGEST_ON_START", "false").lower() == "true":
+    if not loaded and os.getenv("AUTO_INGEST_ON_START", "true").lower() == "true":
         try:
             rebuild(store)
         except (ValueError, OSError, ImportError) as exc:
@@ -72,7 +72,7 @@ def main() -> None:
     store = get_store()
     with st.sidebar:
         st.header("Knowledge base")
-        uploads_enabled = os.getenv("ALLOW_UPLOADS", "true").lower() == "true"
+        uploads_enabled = os.getenv("ALLOW_UPLOADS", "false").lower() == "true"
         uploads = None
         if uploads_enabled:
             uploads = st.file_uploader(
@@ -127,7 +127,7 @@ def main() -> None:
                     st.code(source["excerpt"], language=None)
 
     # Session quota reduces accidental usage; this is NOT a global security/rate-limit control.
-    max_demo_queries = int(os.getenv("MAX_DEMO_QUERIES", "0"))
+    max_demo_queries = int(os.getenv("MAX_DEMO_QUERIES", "10"))
     used_queries = sum(m["role"] == "user" for m in st.session_state["chat_history"])
     quota_reached = max_demo_queries > 0 and used_queries >= max_demo_queries
     if quota_reached:

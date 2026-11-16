@@ -30,7 +30,15 @@ class RAGChatbot:
             return self.llm_client
         key = os.getenv("GROQ_API_KEY")
         if not key:
-            raise RuntimeError("GROQ_API_KEY is missing; set it in .env before chatting")
+            # Streamlit Community Cloud keeps secrets outside the Git repository.
+            try:
+                import streamlit as st
+                key = st.secrets.get("GROQ_API_KEY")
+            except Exception:
+                # Local environments may have no Streamlit secrets file.
+                key = None
+        if not key:
+            raise RuntimeError("GROQ_API_KEY is missing; set it in .env or Streamlit Cloud secrets")
         from groq import Groq
         self.llm_client = Groq(api_key=key)
         return self.llm_client
