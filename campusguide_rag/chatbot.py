@@ -68,6 +68,27 @@ Keep a self-contained question unchanged. Do not answer or add facts. Output onl
 ])
 
 
+def _merge_hits(primary: list[dict], secondary: list[dict], top_k: int) -> list[dict]:
+    """Fuse two retrieval lists without dropping either query's best evidence.
+
+    Each list contains at most ``top_k`` unique passages, so retaining both
+    gives the answer model up to ``2 * top_k`` excerpts. This matters when a
+    rewritten follow-up retrieves a plausible but different passage set.
+    """
+    merged: dict[tuple, dict] = {}
+    scores: dict[tuple, float] = {}
+    for ranking in (primary, secondary):
+        for rank, hit in enumerate(ranking, 1):
+            key = (hit["source"], hit.get("page"), hit["text"])
+            if key not in merged:
+                merged[key] = dict(hit)
+            elif hit.get("score", 0) > merged[key].get("score", 0):
+                merged[key]["score"] = hit["score"]
+            scores[key] = scores.get(key, 0.0) + 1.0 / (60 + rank)
+    ordered = sorted(merged, key=lambda key: scores[key], reverse=True)
+    return [merged[key] for key in ordered[: 2 * top_k]]
+
+
 def _previous_question(history: Sequence[Mapping[str, str]]) -> str | None:
     """Return the most recent user question available for context."""
     for message in reversed(history):
@@ -208,9 +229,14 @@ class RAGChatbot:
         query, status = self._rewrite(question, history)
         start = time.perf_counter()
         hits = self._retrieve(query, top_k)
-        if not hits and query != question:
-            query, status = question, "fallback"
-            hits = self._retrieve(query, top_k)
+        if query != question:
+            # A rewritten follow-up can retrieve less evidence than the original
+            # wording. Search both and fuse the results so a poor rewrite cannot
+            # hide passages that directly answer the user's question.
+            original_hits = self._retrieve(question, top_k)
+            if not hits and original_hits:
+                query, status = question, "fallback"
+            hits = _merge_hits(hits, original_hits, top_k)
         if not hits:
             previous = _previous_question(history)
             if previous and previous != question:
@@ -248,10 +274,17 @@ class RAGChatbot:
             "search_query": query, "refusal": REFUSAL_TEXT,
         }, on_delta).strip()
 
-        if not answer or REFUSAL_TEXT.lower() in answer.lower():
+        if not answer:
+            result["notices"].append("The model returned an empty response.")
+            return result
+        if REFUSAL_TEXT.lower() in answer.lower():
             return result
         citations = set(re.findall(r"\[(\d+)\]", answer))
         available = {str(source["ref"]): source for source in sources}
         if citations and citations <= available.keys():
             result.update(answer=answer, sources=[source for ref, source in available.items() if ref in citations])
+        else:
+            result["notices"].append(
+                "The model's answer was withheld because it did not cite a retrieved passage."
+            )
         return result

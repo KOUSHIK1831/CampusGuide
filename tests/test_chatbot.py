@@ -53,9 +53,12 @@ def test_grounded_answer_includes_source():
 
 
 def test_missing_or_invalid_citations_fail_closed():
-    for text in ("Students borrow four books.", "Students borrow four books [99].", ""):
+    for text, notice in (("Students borrow four books.", "withheld"),
+                         ("Students borrow four books [99].", "withheld"),
+                         ("", "empty")):
         result = RAGChatbot(FakeStore(HITS), FakeClient(text)).ask("How many books?")
         assert result["answer"] == REFUSAL_TEXT
+        assert any(notice in item.lower() for item in result["notices"])
 
 
 def test_question_length_guard():
@@ -145,10 +148,32 @@ def test_rewrite_uses_bounded_completed_history_and_keeps_original_question():
     assert "assistant-6" in rewrite_prompt
     assert "user-0" not in rewrite_prompt
     assert "unanswered turn" not in rewrite_prompt
-    assert store.queries == [standalone]
+    assert store.queries == [standalone, original]
     assert f"Original question: {original}" in client.calls[1]["messages"][1]["content"]
     assert "assistant-6" not in client.calls[1]["messages"][1]["content"]
     assert result["search_query"] == standalone
+    assert result["rewrite_status"] == "rewritten"
+
+
+def test_rewritten_follow_up_fuses_original_question_evidence():
+    original = "skills of koushik"
+    standalone = "What are Koushik's skills?"
+    rewrite_hit = {"source": "resume.pdf", "page": 1, "text": "Profile summary.", "score": 0.60}
+    original_hit = {"source": "resume.pdf", "page": 1, "text": "Skills: Python, SQL.", "score": 0.40}
+    client = FakeClient([standalone, "Koushik knows Python [2]."])
+    store = FakeStore({standalone: [rewrite_hit], original: [original_hit]})
+    history = [
+        {"role": "user", "content": "Tell me about this resume"},
+        {"role": "assistant", "content": "Koushik is a data analyst [1]."},
+    ]
+
+    result = RAGChatbot(store, client).ask(original, history=history)
+
+    assert store.queries == [standalone, original]
+    assert "Skills: Python, SQL." in client.calls[1]["messages"][1]["content"]
+    assert result["sources"] == [{
+        "ref": 2, "source": "resume.pdf", "page": 1, "score": 0.40, "excerpt": "Skills: Python, SQL.",
+    }]
     assert result["rewrite_status"] == "rewritten"
 
 

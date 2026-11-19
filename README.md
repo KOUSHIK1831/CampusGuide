@@ -18,7 +18,7 @@ CampusGuide is a Streamlit document-question-answering application. Upload your 
 
 - **Bring your own key:** Enter your Groq key in a password-masked sidebar field.
 - **Multi-format uploads:** Text-based PDF, DOCX, TXT, Markdown, and JSON.
-- **Follow-up questions:** LangChain rewrites a search query using up to four completed question-and-answer turns. If a follow-up still finds no passage, the previous question is added to the search. Generation still answers the original question from retrieved excerpts.
+- **Follow-up questions:** LangChain rewrites a search query using up to four completed question-and-answer turns. The rewritten and original questions are both searched and their evidence is fused, so a poor rewrite cannot hide passages that directly answer the question. If a follow-up still finds no passage, the previous question is added to the search. Generation still answers the original question from retrieved excerpts.
 - **Hybrid retrieval:** Combines MiniLM cosine similarity and BM25 lexical matches using reciprocal rank fusion. Once one passage clears the cosine cutoff, nearby lower-scoring passages fill the evidence pool so short follow-ups can reach detail sections instead of only a header chunk. Dense retrieval is available as a baseline, with an optional local cross-encoder for hybrid mode.
 - **Streaming and citations:** The UI labels drafts while they stream. The final answer must contain valid citation references to show filenames, PDF pages, and the passages supplied to the model.
 - **Session isolation:** Each visitor gets an in-memory document index and conversation. Changing the file selection clears both.
