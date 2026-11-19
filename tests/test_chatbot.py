@@ -174,6 +174,31 @@ def test_unusable_rewrite_recovers_to_original_question(rewrite, queries):
     assert result["sources"]
 
 
+def test_follow_up_with_no_direct_match_retries_with_previous_question():
+    class ContextStore:
+        def __init__(self):
+            self.queries = []
+
+        def search(self, query, top_k=4, min_score=0.30):
+            self.queries.append(query)
+            return HITS if query == "Koushik skills Hi education" else []
+
+    store = ContextStore()
+    client = FakeClient(["Hi education", "Koushik has Python skills [1]."])
+    history = [
+        {"role": "user", "content": "Koushik skills"},
+        {"role": "assistant", "content": "Koushik has Python skills [1]."},
+    ]
+
+    result = RAGChatbot(store, client).ask("Hi education", history=history)
+
+    assert store.queries == ["Hi education", "Koushik skills Hi education"]
+    assert result["search_query"] == "Koushik skills Hi education"
+    assert result["rewrite_status"] == "context_fallback"
+    assert result["sources"]
+    assert any("previous question" in notice for notice in result["notices"])
+
+
 @pytest.mark.parametrize(
     ("ending", "finish", "accepted"),
     [(" [1].", "stop", True), (" [99].", "stop", False),

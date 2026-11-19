@@ -71,7 +71,9 @@ class BM25Index:
         self.canonical_positions = tuple(canonical_positions)
         self.duplicate_count = len(chunks) - document_count
 
-    def search(self, query: str, dense_positions: Container[int], limit: int) -> dict[int, float]:
+    def search(
+        self, query: str, dense_positions: Container[int], limit: int, *, relaxed: bool = False,
+    ) -> dict[int, float]:
         query_terms = sorted(set(_terms(query)))
         scores = defaultdict(float)
         overlap = Counter()
@@ -87,8 +89,15 @@ class BM25Index:
                 if exact_identifier:
                     identifier_matches.add(position)
 
-        # Stronger overlap is required to introduce evidence below the dense gate.
-        minimum_overlap = max(2, (len(query_terms) + 1) // 2)
+        # Below the dense gate, require stronger overlap. A short query cannot
+        # supply more overlap than it has content terms. Once the caller has a
+        # confident passage, one matching term is enough to add detail evidence.
+        if relaxed:
+            minimum_overlap = 1
+        elif query_terms:
+            minimum_overlap = min(len(query_terms), max(2, (len(query_terms) + 1) // 2))
+        else:
+            minimum_overlap = 1
         eligible = (
             (position, score) for position, score in scores.items()
             if position in dense_positions or position in identifier_matches or overlap[position] >= minimum_overlap

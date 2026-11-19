@@ -18,8 +18,8 @@ CampusGuide is a Streamlit document-question-answering application. Upload your 
 
 - **Bring your own key:** Enter your Groq key in a password-masked sidebar field.
 - **Multi-format uploads:** Text-based PDF, DOCX, TXT, Markdown, and JSON.
-- **Follow-up questions:** LangChain rewrites a search query using up to four completed question-and-answer turns. Generation still answers the original question from retrieved excerpts.
-- **Hybrid retrieval:** Combines MiniLM cosine similarity and BM25 lexical matches using reciprocal rank fusion. Dense retrieval is available as a baseline, with an optional local cross-encoder for hybrid mode.
+- **Follow-up questions:** LangChain rewrites a search query using up to four completed question-and-answer turns. If a follow-up still finds no passage, the previous question is added to the search. Generation still answers the original question from retrieved excerpts.
+- **Hybrid retrieval:** Combines MiniLM cosine similarity and BM25 lexical matches using reciprocal rank fusion. Once one passage clears the cosine cutoff, nearby lower-scoring passages fill the evidence pool so short follow-ups can reach detail sections instead of only a header chunk. Dense retrieval is available as a baseline, with an optional local cross-encoder for hybrid mode.
 - **Streaming and citations:** The UI labels drafts while they stream. The final answer must contain valid citation references to show filenames, PDF pages, and the passages supplied to the model.
 - **Session isolation:** Each visitor gets an in-memory document index and conversation. Changing the file selection clears both.
 - **Document controls:** Up to 10 files; 15 MB per file and 40 MB combined.
@@ -83,7 +83,7 @@ For CLI workflows or local model overrides, copy `.env.example` to `.env` and re
 | `LLM_MODEL` | Groq model name |
 | `EMBEDDING_MODEL` | Sentence Transformer model |
 | `VECTOR_BACKEND` | Vector backend (default FAISS) |
-| `MIN_RETRIEVAL_SCORE` | Dense cosine cutoff applied in both retrieval modes |
+| `MIN_RETRIEVAL_SCORE` | Dense cosine cutoff that anchors both retrieval modes; hybrid finds still require one passage at or above it |
 | `RETRIEVAL_MODE` | Streamlit retrieval strategy, `hybrid` (default) or `dense` |
 | `RERANKER_MODEL` | Optional CPU cross-encoder, for example `cross-encoder/ms-marco-MiniLM-L2-v2` |
 | `DATA_RAW_PATH`, `VECTOR_STORE_PATH` | Optional local CLI data directories |
@@ -113,7 +113,7 @@ filenames, oversize files, and empty extracted text are rejected. A change
 in selected files invalidates the previous document index and chat history,
 preventing responses from an outdated selection.
 
-The embedding step normalizes vectors for cosine retrieval with FAISS `IndexFlatIP` or the NumPy backend. Hybrid retrieval can also admit strong lexical matches below the cosine cutoff. If the optional cross-encoder fails to load or score candidates, the UI keeps the original hybrid order and reports the fallback.
+The embedding step normalizes vectors for cosine retrieval with FAISS `IndexFlatIP` or the NumPy backend. Hybrid retrieval is anchored by at least one passage at or above the cosine cutoff; it then fills the evidence pool with nearby passages and strong lexical matches below that cutoff. Queries with no confident passage still return no evidence. If the optional cross-encoder fails to load or score candidates, the UI keeps the original hybrid order and reports the fallback.
 
 For TXT, Markdown, extractable PDFs and DOCX, CampusGuide reads explicit `Policy ID:`, `Version:`, and `Effective date:` fields in the first 12 lines of the first extracted page or record. Dates use `YYYY-MM-DD`. The answer prompt uses that metadata to qualify policy comparisons and asks for citations to conflicting guidance when the retrieved evidence cannot resolve it. Filename dates and version labels alone cannot establish policy authority or current validity.
 

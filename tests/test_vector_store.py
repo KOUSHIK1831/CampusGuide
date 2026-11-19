@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from campusguide_rag import VectorStore
-from campusguide_rag.retrieval import MAX_RERANK_CANDIDATES
+from campusguide_rag.retrieval import BM25Index, MAX_RERANK_CANDIDATES
 
 
 class FakeEncoder:
@@ -70,6 +70,45 @@ def test_hybrid_admits_strong_overlap_and_rejects_a_single_shared_term(store):
     assert [hit["id"] for hit in store.search("How much is that Wednesday session?", mode="hybrid")] == []
     assert [hit["id"] for hit in store.search("What about those Wednesday sessions?", mode="hybrid")] == ["2"]
     assert store.search("How do I get a permit to access lunar rocks?", mode="hybrid") == []
+
+
+class SectionEncoder:
+    """Mimic a resume: name queries match the header, intent chunks score lower."""
+
+    def encode(self, texts):
+        vectors = []
+        for text in texts:
+            text = text.lower()
+            if "koushik" in text:
+                vectors.append([1.0, 0.0, 0.0])
+            elif "education" in text:
+                vectors.append([0.25, 0.968, 0.0])
+            elif "skills" in text:
+                vectors.append([0.20, 0.980, 0.0])
+            else:
+                vectors.append([0.0, 0.0, 1.0])
+        return np.asarray(vectors, dtype=np.float32)
+
+
+def test_hybrid_anchor_expands_to_detail_chunks_below_cutoff(tmp_path):
+    store = VectorStore(tmp_path, encoder=SectionEncoder(), backend="numpy")
+    store.build([
+        {"id": "header", "source": "resume.pdf", "text": "Koushik Reddy profile summary."},
+        {"id": "education", "source": "resume.pdf", "text": "EDUCATION B.Tech ICFAI University."},
+        {"id": "skills", "source": "resume.pdf", "text": "CORE SKILLS Python SQL FastAPI."},
+        {"id": "projects", "source": "resume.pdf", "text": "Selected projects and certifications."},
+    ])
+
+    assert [hit["id"] for hit in store.search("Koushik education", mode="dense")] == ["header"]
+
+    hits = [hit["id"] for hit in store.search("Koushik education", top_k=3, mode="hybrid")]
+    assert "education" in hits
+    assert "header" in hits
+
+
+def test_lexical_single_term_queries_are_not_impossible():
+    index = BM25Index(({"text": "Koushik Reddy profile summary."},))
+    assert index.search("Koushik", dense_positions=set(), limit=4)
 
 
 def test_hybrid_fuses_overlap_without_requiring_it_for_semantic_hits(tmp_path):

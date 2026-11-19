@@ -15,6 +15,10 @@ import numpy as np
 
 from .retrieval import BM25Index, MAX_RERANK_CANDIDATES, Reranker, fuse_ranks, rerank_hits
 
+# Hybrid search may fill the evidence pool with passages scoring at least this
+# fraction of the dense cutoff, but only after a passage clears the cutoff.
+EXPANSION_FLOOR_RATIO = 0.5
+
 
 @dataclass(frozen=True)
 class _IndexSnapshot:
@@ -102,14 +106,28 @@ class VectorStore:
         # Read past repeats so they cannot crowd out the bounded pool of unique hits.
         duplicates = snapshot.lexical.duplicate_count if mode == "hybrid" else 0
         count = min(limit + duplicates, len(snapshot.chunks))
-        pairs = self._dense_pairs(snapshot.index, vector, count)
-        dense = [
-            (score, position) for score, position in pairs
-            if 0 <= position < len(snapshot.chunks) and score >= min_score
+        pairs = [
+            (score, position) for score, position in self._dense_pairs(snapshot.index, vector, count)
+            if 0 <= position < len(snapshot.chunks)
         ]
+        dense = [(score, position) for score, position in pairs if score >= min_score]
 
         if mode == "hybrid":
-            hits = self._hybrid_hits(snapshot, query, vector[0], dense, limit)
+            # Once a passage clears the dense cutoff, expand the fusion pool with
+            # the next-best passages. Multi-part questions often retrieve only a
+            # header/profile chunk at the cutoff while the education, skills, or
+            # experience chunks score lower on their own. Lexical matching is
+            # relaxed for this anchored pool; queries without any confident hit
+            # keep the stricter gate and can still return no evidence.
+            anchored = bool(dense)
+            strong = {position for _, position in dense}
+            if anchored:
+                expansion_floor = min_score * EXPANSION_FLOOR_RATIO
+                dense = [(score, position) for score, position in pairs if score >= expansion_floor]
+            hits = self._hybrid_hits(
+                snapshot, query, vector[0], dense, limit,
+                relaxed_lexical=anchored, strong_positions=strong,
+            )
         else:
             hits = [
                 {**snapshot.chunks[position], "score": round(score, 4)}
@@ -129,7 +147,8 @@ class VectorStore:
 
     def _hybrid_hits(
         self, snapshot: _IndexSnapshot, query: str, vector: np.ndarray,
-        dense: list[tuple[float, int]], limit: int,
+        dense: list[tuple[float, int]], limit: int, *,
+        relaxed_lexical: bool = False, strong_positions: set[int] | None = None,
     ) -> list[dict]:
         dense_rows = {}
         for score, position in sorted(dense, key=lambda result: (-result[0], result[1])):
@@ -137,10 +156,15 @@ class VectorStore:
             dense_rows.setdefault(canonical, (position, score))
             if len(dense_rows) == limit:
                 break
-        lexical = snapshot.lexical.search(query, dense_rows, limit)
+        lexical = snapshot.lexical.search(query, dense_rows, limit, relaxed=relaxed_lexical)
         fused = fuse_ranks(list(dense_rows), list(lexical))
+        ranked = list(fused.items())
+        if strong_positions:
+            # Keep passages that cleared the cutoff ahead of the expansion pool.
+            strong = {snapshot.lexical.canonical_positions[position] for position in strong_positions}
+            ranked.sort(key=lambda item: (item[0] not in strong, -item[1]))
         hits = []
-        for canonical, fusion_score in list(fused.items())[:limit]:
+        for canonical, fusion_score in ranked[:limit]:
             if canonical in dense_rows:
                 position, score = dense_rows[canonical]
             else:

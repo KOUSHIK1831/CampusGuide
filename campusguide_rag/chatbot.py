@@ -68,6 +68,16 @@ Keep a self-contained question unchanged. Do not answer or add facts. Output onl
 ])
 
 
+def _previous_question(history: Sequence[Mapping[str, str]]) -> str | None:
+    """Return the most recent user question available for context."""
+    for message in reversed(history):
+        if message.get("role") == "user":
+            question = message.get("content", "").strip()
+            if question:
+                return question[:MAX_QUESTION_CHARS]
+    return None
+
+
 def _bounded_history(history: Sequence[Mapping[str, str]]) -> list[dict[str, str]]:
     recent = history[-2 * MAX_HISTORY_TURNS:]
     turns = []
@@ -201,15 +211,27 @@ class RAGChatbot:
         if not hits and query != question:
             query, status = question, "fallback"
             hits = self._retrieve(query, top_k)
+        if not hits:
+            previous = _previous_question(history)
+            if previous and previous != question:
+                # Short or misspelled follow-ups can fail on their own even though
+                # the prior turn already retrieved the supporting passages.
+                context_query = f"{previous} {question}"
+                hits = self._retrieve(context_query, top_k)
+                if hits:
+                    query, status = context_query, "context_fallback"
         result.update(
             search_query=query, rewrite_status=status,
             retrieval_ms=round((time.perf_counter() - start) * 1000, 2),
         )
         if status == "fallback":
             result["notices"].append("Searched using your original question.")
+        if status == "context_fallback":
+            result["notices"].append("No direct match; included your previous question in the search.")
         if any(hit.get("rerank_status") == "fallback" for hit in hits):
             result["notices"].append("Reranking was unavailable. Results use the original retrieval order.")
         if not hits:
+            result["notices"].append("No relevant passages were found in the uploaded documents.")
             return result
 
         sources = [
