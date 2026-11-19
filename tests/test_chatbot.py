@@ -61,6 +61,12 @@ def test_missing_or_invalid_citations_fail_closed():
         assert any(notice in item.lower() for item in result["notices"])
 
 
+def test_model_refusal_explains_insufficient_evidence():
+    result = RAGChatbot(FakeStore(HITS), FakeClient(REFUSAL_TEXT)).ask("How many books?")
+    assert result["answer"] == REFUSAL_TEXT
+    assert any("did not find" in item.lower() for item in result["notices"])
+
+
 def test_question_length_guard():
     client = FakeClient("Something [1]")
     result = RAGChatbot(FakeStore(HITS), client).ask("q" * 1001)

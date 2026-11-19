@@ -278,6 +278,7 @@ class RAGChatbot:
             result["notices"].append("The model returned an empty response.")
             return result
         if REFUSAL_TEXT.lower() in answer.lower():
+            result["notices"].append("The model did not find the retrieved passages sufficient to answer.")
             return result
         citations = set(re.findall(r"\[(\d+)\]", answer))
         available = {str(source["ref"]): source for source in sources}
