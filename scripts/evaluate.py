@@ -201,7 +201,12 @@ def _file_sha256(path: Path) -> str:
 
 def _warm_search(store: VectorStore, cases: list[dict], k: int, threshold: float, mode: str,
                  reranker: Reranker | None) -> int:
-    # A one-candidate search exercises the encoder but defers reranker initialization.
+    if reranker is not None:
+        try:
+            reranker("warmup query", ["warmup passage one", "warmup passage two"])
+        except Exception:
+            # Retrieval handles reranker failures by falling back to the original order.
+            pass
     for count, case in enumerate(cases, 1):
         hits = store.search(case["question"], top_k=k, min_score=threshold, mode=mode, reranker=reranker)
         if reranker is None or (hits and hits[0]["rerank_status"] in {"applied", "fallback"}):

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.evaluate import evaluate, load_corpus, load_manifest
+from scripts.evaluate import _warm_search, evaluate, load_corpus, load_manifest
 
 
 class FakeStore:
@@ -20,6 +20,35 @@ class FakeStore:
         if query == "What is the time limit?":
             return [{"source": "handbook.md", "text": "Applications open 14 days before."}]
         return []
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_warm_search_initializes_reranker_before_search_even_without_candidates(fails):
+    events = []
+
+    def reranker(query, passages):
+        events.append(("rerank", query, passages))
+        if fails:
+            raise RuntimeError("unavailable")
+        return [0.0, 0.0]
+
+    class EmptyStore:
+        def search(self, query, top_k, min_score, *, mode, reranker):
+            events.append(("search", query, top_k, min_score, mode, reranker))
+            return []
+
+    cases = [{"question": "first"}, {"question": "second"}]
+    assert _warm_search(EmptyStore(), cases, 4, 0.3, "hybrid", reranker) == 2
+    assert events[0][0] == "rerank"
+    assert len(events[0][2]) == 2
+    assert [event[1] for event in events[1:]] == ["first", "second"]
+
+
+def test_warm_search_without_reranker_stops_after_first_search():
+    store = FakeStore()
+    cases = [{"question": "missing"}, {"question": "library rules"}]
+    assert _warm_search(store, cases, 4, 0.3, "dense", None) == 1
+    assert store.requests == [("missing", 4, 0.3, "dense", None)]
 
 
 def test_evidence_rank_refusal_and_supplied_follow_up_are_scored_separately():
