@@ -37,7 +37,7 @@ def get_reranker(model_name: str) -> CrossEncoderReranker:
 
 
 def recent_conversation(messages: list[dict]) -> list[dict]:
-    """Return bounded, complete turns with citation-checked final responses."""
+    """Return bounded, complete turns with finalized responses and sources."""
     recent = []
     for assistant, user in pairwise(reversed(messages)):
         if (assistant["role"] != "assistant" or user["role"] != "user"
@@ -57,7 +57,7 @@ def render_message(message: dict) -> None:
         st.text(message["content"])
         return
     st.markdown(message["content"])
-    if message.get("sources"):
+    if message.get("sources") and message.get("citations_verified", True):
         st.caption("Citation references checked.")
     for notice in message.get("notices", []):
         st.caption(notice)
@@ -186,6 +186,7 @@ def main() -> None:
             assistant_message = {
                 "role": "assistant", "content": result["answer"], "sources": result["sources"],
                 "notices": result.get("notices", []),
+                "citations_verified": result.get("citations_verified", False),
             }
         except RuntimeError as exc:
             assistant_message = {"role": "assistant", "content": str(exc), "sources": []}

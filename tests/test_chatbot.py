@@ -52,13 +52,35 @@ def test_grounded_answer_includes_source():
     assert "untrusted data" in client.calls[0]["messages"][0]["content"]
 
 
-def test_missing_or_invalid_citations_fail_closed():
-    for text, notice in (("Students borrow four books.", "withheld"),
-                         ("Students borrow four books [99].", "withheld"),
-                         ("", "empty")):
+def test_missing_or_invalid_citations_are_explained_not_refused():
+    for text, expected in (("Students borrow four books.", "Students borrow four books."),
+                           ("Students borrow four books [99].", "Students borrow four books.")):
         result = RAGChatbot(FakeStore(HITS), FakeClient(text)).ask("How many books?")
-        assert result["answer"] == REFUSAL_TEXT
-        assert any(notice in item.lower() for item in result["notices"])
+        assert result["answer"] == expected
+        assert result["sources"] == [{
+            "ref": 1, "source": "policy.pdf", "page": 2, "score": 0.85,
+            "excerpt": "Students borrow four books.",
+        }]
+        assert result["citations_verified"] is False
+        assert any("citation checks" in item for item in result["notices"])
+
+    result = RAGChatbot(FakeStore(HITS), FakeClient("")).ask("How many books?")
+    assert result["answer"] == REFUSAL_TEXT
+    assert any("empty" in item.lower() for item in result["notices"])
+
+
+def test_uncited_answer_is_repaired_with_citations():
+    draft = "Koushik has a B.Tech from ICFAI University."
+    repaired = "Koushik has a B.Tech from ICFAI University [1]."
+    client = FakeClient([draft, repaired])
+
+    result = RAGChatbot(FakeStore(HITS), client).ask("education of koushik")
+
+    assert result["answer"] == repaired
+    assert result["citations_verified"] is True
+    assert result["sources"][0]["excerpt"] == HITS[0]["text"]
+    assert len(client.calls) == 2
+    assert draft in client.calls[1]["messages"][1]["content"]
 
 
 def test_model_refusal_explains_insufficient_evidence():
@@ -212,7 +234,7 @@ def test_follow_up_with_no_direct_match_retries_with_previous_question():
 
         def search(self, query, top_k=4, min_score=0.30):
             self.queries.append(query)
-            return HITS if query == "Koushik skills Hi education" else []
+            return HITS if query == "Hi education Koushik skills" else []
 
     store = ContextStore()
     client = FakeClient(["Hi education", "Koushik has Python skills [1]."])
@@ -223,19 +245,54 @@ def test_follow_up_with_no_direct_match_retries_with_previous_question():
 
     result = RAGChatbot(store, client).ask("Hi education", history=history)
 
-    assert store.queries == ["Hi education", "Koushik skills Hi education"]
-    assert result["search_query"] == "Koushik skills Hi education"
+    assert store.queries == ["Hi education", "Hi education Koushik skills"]
+    assert result["search_query"] == "Hi education Koushik skills"
     assert result["rewrite_status"] == "context_fallback"
     assert result["sources"]
     assert any("previous question" in notice for notice in result["notices"])
 
 
+def test_short_weak_follow_up_searches_with_previous_question():
+    header = {"source": "resume.pdf", "page": 1, "text": "Profile summary.", "score": 0.277}
+    skills = {"source": "resume.pdf", "page": 1, "text": "Skills: Python, SQL.", "score": 0.223}
+
+    class ContextStore:
+        def __init__(self):
+            self.queries = []
+
+        def search(self, query, top_k=4, min_score=0.30):
+            self.queries.append(query)
+            if query == "skills":
+                return [header]
+            if query == "skills education of koushik":
+                return [{**header, "score": 0.405}, skills]
+            return []
+
+    store = ContextStore()
+    client = FakeClient(["skills", "Koushik knows Python [2]."])
+    history = [
+        {"role": "user", "content": "education of koushik"},
+        {"role": "assistant", "content": "ICFAI University [1]."},
+    ]
+
+    result = RAGChatbot(store, client).ask("skills", history=history)
+
+    assert store.queries == ["skills", "skills education of koushik"]
+    assert result["rewrite_status"] == "context_fallback"
+    assert "Skills: Python, SQL." in client.calls[1]["messages"][1]["content"]
+    assert [source["excerpt"] for source in result["sources"]] == ["Skills: Python, SQL."]
+
+
 @pytest.mark.parametrize(
-    ("ending", "finish", "accepted"),
-    [(" [1].", "stop", True), (" [99].", "stop", False),
-     (" [1].", "length", False), (" [1].", None, False)],
+    ("ending", "finish", "expected", "has_sources", "verified"),
+    [(" [1].", "stop", "Four books [1].", True, True),
+     (" [99].", "stop", "Four books.", True, False),
+     (" [1].", "length", REFUSAL_TEXT, False, False),
+     (" [1].", None, REFUSAL_TEXT, False, False)],
 )
-def test_groq_sdk_stream_via_langchain_validates_complete_response(ending, finish, accepted):
+def test_groq_sdk_stream_via_langchain_validates_complete_response(
+    ending, finish, expected, has_sources, verified,
+):
     deltas = []
 
     def post_completion(request):
@@ -262,8 +319,9 @@ def test_groq_sdk_stream_via_langchain_validates_complete_response(ending, finis
         result = RAGChatbot(FakeStore(HITS), client).ask("How many?", on_delta=deltas.append)
 
     assert deltas == ["Four books", ending]
-    assert result["answer"] == ("Four books [1]." if accepted else REFUSAL_TEXT)
-    assert bool(result["sources"]) == accepted
+    assert result["answer"] == expected
+    assert bool(result["sources"]) == has_sources
+    assert result["citations_verified"] is verified
 
 
 def test_provider_error_after_partial_stream_is_sanitized():

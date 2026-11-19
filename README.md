@@ -18,9 +18,9 @@ CampusGuide is a Streamlit document-question-answering application. Upload your 
 
 - **Bring your own key:** Enter your Groq key in a password-masked sidebar field.
 - **Multi-format uploads:** Text-based PDF, DOCX, TXT, Markdown, and JSON.
-- **Follow-up questions:** LangChain rewrites a search query using up to four completed question-and-answer turns. The rewritten and original questions are both searched and their evidence is fused, so a poor rewrite cannot hide passages that directly answer the question. If a follow-up still finds no passage, the previous question is added to the search. Generation still answers the original question from retrieved excerpts.
+- **Follow-up questions:** LangChain rewrites a search query using up to four completed question-and-answer turns. The rewritten and original questions are both searched and their evidence is fused, so a poor rewrite cannot hide passages that directly answer the question. If a short follow-up retrieves only a weak passage, or nothing at all, the previous question is added to the search. Generation still answers the original question from retrieved excerpts.
 - **Hybrid retrieval:** Combines MiniLM cosine similarity and BM25 lexical matches using reciprocal rank fusion. Once one passage clears the cosine cutoff, nearby lower-scoring passages fill the evidence pool so short follow-ups can reach detail sections instead of only a header chunk. Dense retrieval is available as a baseline, with an optional local cross-encoder for hybrid mode.
-- **Streaming and citations:** The UI labels drafts while they stream. The final answer must contain valid citation references to show filenames, PDF pages, and the passages supplied to the model.
+- **Streaming and citations:** The UI labels drafts while they stream. When the model omits or invents citation markers, CampusGuide makes one repair attempt. If repair still fails, it shows the answer with the retrieved sources and a verification notice instead of discarding a potentially useful answer. Verified answers show filenames, PDF pages, and the passages supplied to the model.
 - **Session isolation:** Each visitor gets an in-memory document index and conversation. Changing the file selection clears both.
 - **Document controls:** Up to 10 files; 15 MB per file and 40 MB combined.
 - **Testing and evaluation:** pytest tests, retrieval cases, and GitHub Actions.
@@ -67,12 +67,14 @@ flowchart TD
     H -->|No| I[No-information response]
     H -->|Yes| J[LangChain and Groq stream a draft from excerpts]
     F --> J
-    J --> K{Complete with valid source references?}
-    K -->|No| I
+    J --> K{Valid source references?}
     K -->|Yes| L[Answer and citations]
+    K -->|No| M[One citation repair call]
+    M -->|Repaired| L
+    M -->|Not repaired| N[Answer with retrieved sources and verification notice]
 ```
 
-The embedding model defaults to `sentence-transformers/all-MiniLM-L6-v2` and the Groq model to `openai/gpt-oss-20b`. Citation validation checks that the answer references real excerpts in the request. Review each cited passage for factual support.
+The embedding model defaults to `sentence-transformers/all-MiniLM-L6-v2` and the Groq model to `openai/gpt-oss-20b`. Citation validation checks that the answer references real excerpts in the request. If the model omits citations, one non-streaming repair call adds them. If repair still fails, the answer is shown with all retrieved sources and an explicit notice, so a formatting failure does not turn a grounded answer into a refusal. Review each cited passage for factual support.
 
 ## Configuration
 
