@@ -1,5 +1,171 @@
-[
-  {"question": "How many library books may students borrow at once?", "expected_source": "campus_faq.md"},
-  {"question": "When are academic advising sessions held?", "expected_source": "campus_faq.md"},
-  {"question": "Where should I report a lost student ID card?", "expected_source": "campus_faq.md"}
-]
+{
+  "schema_version": 1,
+  "description": "CampusGuide development retrieval benchmark. Cases and excerpt labels were created for this upgrade and have not been independently reviewed.",
+  "corpus": [
+    {"path": "../data/examples/campus_faq.md", "provenance": "Existing fictional repository demo"},
+    {"path": "../data/raw/UNIVERSITY POLICY FOR MAKEUP EXAMS.txt", "provenance": "Repository text snapshot, date unverified"},
+    {"path": "../data/raw/IFHE UG Summer Term Examinations.txt", "provenance": "Repository text snapshot dated July 26, 2025"},
+    {"path": "../data/raw/Thrithi 2025 Student Participation.txt", "provenance": "Repository text snapshot for the March 2025 event"},
+    {"path": "fixtures/northstar_equipment_v1.md", "provenance": "Synthetic fictional policy, version 1"},
+    {"path": "fixtures/northstar_equipment_v2.md", "provenance": "Synthetic fictional policy, version 2"},
+    {"path": "fixtures/northstar_auditorium_handbook.md", "provenance": "Synthetic fictional policy, intentionally conflicting and undated"},
+    {"path": "fixtures/northstar_student_union_notice.md", "provenance": "Synthetic fictional notice, intentionally conflicting and undated"},
+    {"path": "fixtures/northstar_services.md", "provenance": "Synthetic fictional services reference"},
+    {"path": "fixtures/northstar_service_annex.md", "provenance": "Synthetic fictional services reference with similar identifiers"}
+  ],
+  "cases": [
+    {
+      "id": "demo-library-limit",
+      "kind": "answerable",
+      "question": "How many library books may students borrow at once?",
+      "evidence": [{"source": "campus_faq.md", "contains": "borrow up to four library books at once"}]
+    },
+    {
+      "id": "demo-advising-day",
+      "kind": "answerable",
+      "question": "On which weekday can I meet an academic adviser?",
+      "evidence": [{"source": "campus_faq.md", "contains": "Advising sessions take place on Wednesdays"}]
+    },
+    {
+      "id": "demo-id-desk",
+      "kind": "answerable",
+      "question": "Where should I report a lost student ID card?",
+      "evidence": [{"source": "campus_faq.md", "contains": "reported to the campus administration desk"}]
+    },
+    {
+      "id": "archive-makeup-attendance",
+      "kind": "answerable",
+      "question": "According to the archived makeup exam policy, can I take an end-term makeup if I was ineligible due to low attendance?",
+      "evidence": [{"source": "UNIVERSITY POLICY FOR MAKEUP EXAMS.txt", "contains": "The student is NOT allowed to write ‘End Term Makeup’ exam"}]
+    },
+    {
+      "id": "archive-makeup-low-mark",
+      "kind": "answerable",
+      "question": "What grade does the archived comprehensive-exam makeup policy assign for a score of 19 out of 100?",
+      "evidence": [{"source": "UNIVERSITY POLICY FOR MAKEUP EXAMS.txt", "contains": "the student will be awarded the ‘NC’ Grade"}]
+    },
+    {
+      "id": "archive-summer-late-entry",
+      "kind": "answerable",
+      "question": "Under the July 2025 IFHE undergraduate summer exam instructions, how many minutes late can a student enter the exam hall?",
+      "evidence": [{"source": "IFHE UG Summer Term Examinations.txt", "contains": "Students are allowed into Exam Hall till 10 mins after exam starts"}]
+    },
+    {
+      "id": "archive-thrithi-parent-consent",
+      "kind": "answerable",
+      "question": "For Thrithi 2025, what was the deadline to upload the parent consent form?",
+      "evidence": [{"source": "Thrithi 2025 Student Participation.txt", "contains": "upload the parent consent form to the SIS portal by March 18th, 2025"}]
+    },
+    {
+      "id": "archive-thrithi-digital-id",
+      "kind": "answerable",
+      "question": "Did the Thrithi 2025 campus entry instructions accept a digital SIS ID?",
+      "evidence": [{"source": "Thrithi 2025 Student Participation.txt", "contains": "Digital SIS IDs are not valid for campus entry"}]
+    },
+    {
+      "id": "northstar-shuttle",
+      "kind": "answerable",
+      "question": "Which stop does the Northstar N7X shuttle serve on weekday evenings?",
+      "evidence": [{"source": "northstar_services.md", "contains": "The N7X shuttle serves the Observatory stop on weekday evenings"}]
+    },
+    {
+      "id": "northstar-form",
+      "kind": "answerable",
+      "question": "What is Northstar form LAB-42R for?",
+      "evidence": [{"source": "northstar_service_annex.md", "contains": "Use form LAB-42R when requesting a replacement laboratory locker key"}]
+    },
+    {
+      "id": "northstar-equipment-september-2024",
+      "kind": "answerable",
+      "question": "What was the checkout period for a Northstar Media Lab camera kit on September 15, 2024?",
+      "evidence": [{"source": "northstar_equipment_v1.md", "contains": "camera kits may be checked out for 48 hours"}]
+    },
+    {
+      "id": "northstar-equipment-september-2025",
+      "kind": "answerable",
+      "question": "What checkout period applied to a Northstar Media Lab camera kit on September 15, 2025?",
+      "evidence": [{"source": "northstar_equipment_v2.md", "contains": "camera kits may be checked out for 24 hours"}]
+    },
+    {
+      "id": "follow-up-demo-library",
+      "kind": "follow_up",
+      "question": "And for how long?",
+      "history": [
+        {"role": "user", "content": "How many library books can a student borrow at once?"},
+        {"role": "assistant", "content": "A student can borrow up to four library books at once."}
+      ],
+      "standalone_query": "What is the loan period for books at the demo campus library?",
+      "evidence": [{"source": "campus_faq.md", "contains": "Loan periods are fourteen days"}]
+    },
+    {
+      "id": "follow-up-summer-id",
+      "kind": "follow_up",
+      "question": "Would the copy on my phone work?",
+      "history": [
+        {"role": "user", "content": "Was a student ID compulsory for the July 2025 IFHE undergraduate summer exam?"},
+        {"role": "assistant", "content": "A student ID card was compulsory for writing the exam."}
+      ],
+      "standalone_query": "Could students show a digital student ID card on a phone to enter the July 2025 IFHE undergraduate summer exam?",
+      "evidence": [{"source": "IFHE UG Summer Term Examinations.txt", "contains": "Showing softcopies in mobile phones is NOT ACCEPTED for admission to exam"}]
+    },
+    {
+      "id": "follow-up-northstar-equipment",
+      "kind": "follow_up",
+      "question": "What if I find that it is damaged?",
+      "history": [
+        {"role": "user", "content": "How long can I borrow a Northstar Media Lab camera kit under the policy effective September 1, 2025?"},
+        {"role": "assistant", "content": "That policy allows a 24-hour loan."}
+      ],
+      "standalone_query": "Under the Northstar Media Lab equipment lending policy effective September 1, 2025, who handles damage to a borrowed camera kit?",
+      "evidence": [{"source": "northstar_equipment_v2.md", "contains": "Report damaged gear to the Media Lab technician at return"}]
+    },
+    {
+      "id": "conflict-auditorium",
+      "kind": "conflict",
+      "question": "How far in advance may a student group reserve the Cedar Auditorium at Northstar College?",
+      "evidence": [
+        {"source": "northstar_auditorium_handbook.md", "contains": "up to 30 calendar days ahead of the event"},
+        {"source": "northstar_student_union_notice.md", "contains": "up to 14 calendar days ahead of the event"}
+      ]
+    },
+    {
+      "id": "conflict-equipment-versions",
+      "kind": "conflict",
+      "question": "How did Northstar's camera-kit loan period change between equipment lending policy versions 1 and 2?",
+      "evidence": [
+        {"source": "northstar_equipment_v1.md", "contains": "camera kits may be checked out for 48 hours"},
+        {"source": "northstar_equipment_v2.md", "contains": "camera kits may be checked out for 24 hours"}
+      ]
+    },
+    {
+      "id": "negative-scholarship",
+      "kind": "negative",
+      "question": "How do I apply for a postgraduate tuition scholarship?",
+      "evidence": []
+    },
+    {
+      "id": "negative-thrithi-new-year",
+      "kind": "negative",
+      "question": "What was the deadline for the Thrithi 2026 parent consent form?",
+      "evidence": []
+    },
+    {
+      "id": "negative-camera-fines",
+      "kind": "negative",
+      "question": "What overdue fine is charged on a Northstar Media Lab camera kit?",
+      "evidence": []
+    },
+    {
+      "id": "negative-weekend-shuttle",
+      "kind": "negative",
+      "question": "What time does the first Northstar N7X shuttle leave on Saturdays?",
+      "evidence": []
+    },
+    {
+      "id": "negative-unrelated",
+      "kind": "negative",
+      "question": "What's the chemical formula for table salt?",
+      "evidence": []
+    }
+  ]
+}

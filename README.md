@@ -18,14 +18,15 @@ CampusGuide is a Streamlit document-question-answering application. Upload your 
 
 - **Bring your own key:** Enter your Groq key in a password-masked sidebar field.
 - **Multi-format uploads:** Text-based PDF, DOCX, TXT, Markdown, and JSON.
-- **Source citations:** Inspect filenames, PDF page numbers, and matching excerpts.
-- **Session isolation:** Each visitor gets an in-memory **FAISS** document index.
-- **Grounding checks:** Similarity thresholds and citation validation reject unsupported responses.
+- **Follow-up questions:** LangChain rewrites a search query using up to four completed question-and-answer turns. Generation still answers the original question from retrieved excerpts.
+- **Hybrid retrieval:** Combines MiniLM cosine similarity and BM25 lexical matches using reciprocal rank fusion. Dense retrieval is available as a baseline, with an optional local cross-encoder for hybrid mode.
+- **Streaming and citations:** The UI labels drafts while they stream. The final answer must contain valid citation references to show filenames, PDF pages, and the passages supplied to the model.
+- **Session isolation:** Each visitor gets an in-memory document index and conversation. Changing the file selection clears both.
 - **Document controls:** Up to 10 files; 15 MB per file and 40 MB combined.
 - **Testing and evaluation:** pytest tests, retrieval cases, and GitHub Actions.
 
 > [!IMPORTANT]
-> Never publish a Groq API key. Uploaded files are processed by the hosting service, and retrieved excerpts are sent to Groq for generation. Do not upload confidential or regulated documents.
+> The hosting service processes uploaded files. Groq receives retrieved excerpts for answering and a limited amount of dialogue for rewriting later questions. Keep API keys private and avoid uploading sensitive documents.
 
 ## Quick start
 
@@ -58,19 +59,20 @@ Try [`data/examples/campus_faq.md`](data/examples/campus_faq.md) to explore the 
 flowchart TD
     A[Upload files] --> B[Validate and extract text]
     B --> C[Chunk passages and retain source metadata]
-    C --> D[Sentence Transformers embeddings]
-    D --> E[Session-local FAISS index]
-    F[User question] --> G[Vector retrieval]
+    C --> E[Session index with MiniLM vectors and BM25]
+    F[Original question] --> W[Standalone search query from bounded history]
+    W --> G[Dense or hybrid retrieval]
     E --> G
     G --> H{Relevant excerpts?}
     H -->|No| I[No-information response]
-    H -->|Yes| J[Groq LLM with context]
-    J --> K{Valid source citations?}
+    H -->|Yes| J[LangChain and Groq stream a draft from excerpts]
+    F --> J
+    J --> K{Complete with valid source references?}
     K -->|No| I
     K -->|Yes| L[Answer and citations]
 ```
 
-The default embedding model is `sentence-transformers/all-MiniLM-L6-v2`; the default Groq model is `openai/gpt-oss-20b`. A valid citation demonstrates which excerpt was used, **not** that the generated claim is necessarily correct.
+The embedding model defaults to `sentence-transformers/all-MiniLM-L6-v2` and the Groq model to `openai/gpt-oss-20b`. Citation validation checks that the answer references real excerpts in the request. Review each cited passage for factual support.
 
 ## Configuration
 
@@ -81,7 +83,9 @@ For CLI workflows or local model overrides, copy `.env.example` to `.env` and re
 | `LLM_MODEL` | Groq model name |
 | `EMBEDDING_MODEL` | Sentence Transformer model |
 | `VECTOR_BACKEND` | Vector backend (default FAISS) |
-| `MIN_RETRIEVAL_SCORE` | Relevance cutoff |
+| `MIN_RETRIEVAL_SCORE` | Dense cosine cutoff applied in both retrieval modes |
+| `RETRIEVAL_MODE` | Streamlit retrieval strategy, `hybrid` (default) or `dense` |
+| `RERANKER_MODEL` | Optional CPU cross-encoder, for example `cross-encoder/ms-marco-MiniLM-L2-v2` |
 | `DATA_RAW_PATH`, `VECTOR_STORE_PATH` | Optional local CLI data directories |
 
 The interactive UI accepts the Groq key directly and does not require a shared hosting-provider key.
@@ -89,7 +93,7 @@ The interactive UI accepts the Groq key directly and does not require a shared h
 ## Testing
 
 ```bash
-python -m pip install pytest
+python -m pip install ".[dev]"
 python -m pytest -q
 ```
 
@@ -109,28 +113,22 @@ filenames, oversize files, and empty extracted text are rejected. A change
 in selected files invalidates the previous document index and chat history,
 preventing responses from an outdated selection.
 
-The embedding step normalizes vectors and stores them in a per-session
-FAISS `IndexFlatIP` index. Query results are filtered by a relevance
-threshold; the generation step uses retrieved excerpts with their
-source metadata. Citation validation rejects answers with missing
-or invalid source references, but cannot prove factual correctness.
+The embedding step normalizes vectors for cosine retrieval with FAISS `IndexFlatIP` or the NumPy backend. Hybrid retrieval can also admit strong lexical matches below the cosine cutoff. If the optional cross-encoder fails to load or score candidates, the UI keeps the original hybrid order and reports the fallback.
+
+For TXT, Markdown, extractable PDFs and DOCX, CampusGuide reads explicit `Policy ID:`, `Version:`, and `Effective date:` fields in the first 12 lines of the first extracted page or record. Dates use `YYYY-MM-DD`. The answer prompt uses that metadata to qualify policy comparisons and asks for citations to conflicting guidance when the retrieved evidence cannot resolve it. Filename dates and version labels alone cannot establish policy authority or current validity.
 
 ## Retrieval evaluation and maintenance
 
-The repository includes a command-line workflow for indexing a local
-corpus and evaluating which source documents the retriever returns.
-This is **retrieval evaluation**, not an accuracy score for generated answers.
+The default offline benchmark builds an index from the committed manifest. It compares dense, hybrid, and optionally reranked hybrid retrieval under the same conditions, with archived source snapshots and clearly marked fictional fixtures.
 
 ```bash
-python scripts/ingest.py
-python scripts/evaluate.py --cases evaluation/demo_cases.json
-python -m pytest -q
+python scripts/evaluate.py --backend numpy --details
+python scripts/evaluate.py --backend numpy --reranker-model
 ```
 
-The evaluator reports source hit rates for questions with known expected
-sources and the rate of empty retrievals for negative examples. It does
-not measure whether an LLM's final wording is correct. See
-[`evaluation/`](evaluation/) and [`scripts/evaluate.py`](scripts/evaluate.py).
+The evaluator reports passage hits, first relevant rank, full evidence coverage, empty retrieval on negative questions, and warm search latency. Standalone follow-up queries supplied by the fixture are scored separately. See the [benchmark and upgrade report](docs/RAG_UPGRADE.md) for measured results and limitations.
+
+Use `python scripts/ingest.py` to index your own files, then pass `--index data/processed --cases <manifest>` with labels that refer to your corpus.
 
 ## Common problems
 

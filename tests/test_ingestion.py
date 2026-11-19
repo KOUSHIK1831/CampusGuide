@@ -97,3 +97,23 @@ def test_bad_docx_does_not_abort_directory_ingestion(tmp_path):
     assert len(errors) == 1
     assert "bad.docx" in errors[0]
     assert "Unreadable DOCX document" in errors[0]
+
+
+def test_policy_header_is_propagated_through_chunks(tmp_path):
+    file = tmp_path / "library-2025.md"
+    file.write_bytes(
+        b"# Library policy\r\n\r\nPolicy ID: LIB-001\r\nVersion: 2\r\nEffective date: 2025-01-01\r\n"
+        + (b"Library policy information. " * 10),
+    )
+    units = load_document(file)
+    assert "\r" not in units[0]["text"]
+    chunks = chunk_documents(units, chunk_size=140, overlap=15)
+    assert len(chunks) > 1
+    for chunk in chunks:
+        assert (chunk["policy_id"], chunk["version"], chunk["effective_date"]) == ("LIB-001", "2", "2025-01-01")
+
+
+def test_policy_metadata_ignores_invalid_dates_duplicate_versions_and_filename_dates(tmp_path):
+    file = tmp_path / "library-2025.md"
+    file.write_text("# Library\nVersion: 1\nVersion: 2\nEffective date: 2025-02-30\nBody.", encoding="utf-8")
+    assert set(load_document(file)[0]) == {"source", "page", "text"}

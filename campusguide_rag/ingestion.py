@@ -5,14 +5,17 @@ content to a shared directory. The CLI can still load local files by path.
 """
 from __future__ import annotations
 
-from io import BytesIO
 import json
 import re
+from datetime import date
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 SUPPORTED_EXTENSIONS = frozenset({".txt", ".md", ".markdown", ".json", ".pdf", ".docx"})
 MAX_FILE_BYTES = 15 * 1024 * 1024
+POLICY_FIELDS = ("policy_id", "version", "effective_date")
+_POLICY_HEADER = re.compile(r"(Policy ID|Version|Effective date):[ \t]*(\S.{0,79})", re.IGNORECASE)
 
 
 def _json_records(data: Any) -> list[str]:
@@ -21,6 +24,26 @@ def _json_records(data: Any) -> list[str]:
     if isinstance(data, list):
         return [json.dumps(item, ensure_ascii=False, sort_keys=True) for item in data]
     return [json.dumps(data, ensure_ascii=False, sort_keys=True)]
+
+
+def _policy_metadata(first_record: str) -> dict[str, str]:
+    """Accept explicitly labeled fields near the top of a document."""
+    headers: dict[str, set[str]] = {}
+    for line in first_record.strip().split("\n", 12)[:12]:
+        match = _POLICY_HEADER.fullmatch(line.strip())
+        if match:
+            field = match[1].lower().replace(" ", "_")
+            headers.setdefault(field, set()).add(match[2])
+    metadata = {field: values.pop() for field, values in headers.items() if len(values) == 1}
+    if "effective_date" in metadata:
+        value = metadata["effective_date"]
+        try:
+            # Require the documented YYYY-MM-DD form, including zero padding.
+            if date.fromisoformat(value).isoformat() != value:
+                metadata.pop("effective_date")
+        except ValueError:
+            metadata.pop("effective_date")
+    return metadata
 
 
 def load_document_bytes(filename: str, data: bytes) -> list[dict]:
@@ -41,7 +64,7 @@ def load_document_bytes(filename: str, data: bytes) -> list[dict]:
     records: list[tuple[int | None, str]] = []
     if suffix in {".txt", ".md", ".markdown", ".json"}:
         try:
-            decoded = data.decode("utf-8-sig")
+            decoded = data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
         except UnicodeError as exc:
             raise ValueError(f"Document must be UTF-8 encoded: {source}") from exc
         if suffix == ".json":
@@ -74,8 +97,9 @@ def load_document_bytes(filename: str, data: bytes) -> list[dict]:
         except Exception as exc:
             raise ValueError(f"Unreadable DOCX document: {source}") from exc
 
+    metadata = _policy_metadata(records[0][1]) if records and suffix != ".json" else {}
     units = [
-        {"text": content.strip(), "source": source, "page": page}
+        {"text": content.strip(), "source": source, "page": page, **metadata}
         for page, content in records if content and content.strip()
     ]
     if not units:
@@ -144,5 +168,6 @@ def chunk_documents(units: list[dict], chunk_size: int = 900, overlap: int = 120
             result.append({
                 "id": f"{unit_id}:{chunk_id}", "text": part,
                 "source": unit["source"], "page": unit.get("page"),
+                **{field: unit[field] for field in POLICY_FIELDS if unit.get(field)},
             })
     return result

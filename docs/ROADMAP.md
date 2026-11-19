@@ -10,15 +10,15 @@ This update introduces `campusguide_rag/` as the maintained pipeline and rewrite
 
 - Extract text from TXT/Markdown/JSON/DOCX and text-based PDFs; reject unreadable documents and scanned PDFs.
 - Chunk and index with a local sentence encoder and FAISS `IndexFlatIP`; normalize vectors to use cosine similarity.
-- Search top k with a configurable threshold, send numbered excerpts to Groq Llama, display cited passages.
+- Search top k with a configurable threshold, send numbered excerpts to Groq, and display cited passages.
 - Return no-evidence refusal when retrieval is empty or response citations are invalid.
 - Full index rebuild on upload; initial indexing via CLI or sidebar.
 
 ## Phase 2 — quality, partially implemented
 
-**Included:** pytest ingestion/embedding/search/guardrail tests with a deterministic fake encoder; optional FAISS integration test; CI; basic source-hit@k and negative retrieval-rate evaluation.
+**Included** in the [RAG upgrade](RAG_UPGRADE.md) are follow-up rewriting, hybrid retrieval, optional CPU reranking, streaming, and excerpt-level evaluation of hits, ranks, evidence coverage, and empty retrieval. Tests cover both vector backends and exercise mocked provider streams and Streamlit state in CI.
 
-**Next:** label at least 30–50 genuine positive/negative questions; add document-independent train/evaluation sets, precision@k / MRR, citation-support annotation, prompt injection red-team tests, embedding/model latency and cost benchmarks, accessibility and chat-history controls. Add an entailment validator only after comparing its errors against human assessments.
+**Next** are independently reviewed evaluation questions, citation-support annotation, live rewrite and answer evaluation, model latency and cost measurements, and accessibility and chat-history controls.
 
 ## Phase 3 — shipping, partial
 
@@ -32,8 +32,8 @@ This update introduces `campusguide_rag/` as the maintained pipeline and rewrite
 - **FAISS vs hosted vectors:** FAISS is free, portable, and fast for a small static corpus; it cannot provide multi-tenant security, managed incremental updates or shared persistence on its own.
 - **MiniLM vs hosted embeddings:** local model avoids per-document API costs and works offline after initial download; its accuracy and multilingual quality require domain evaluation.
 - **Guardrails:** threshold filtering, context-only prompts, explicit instruction/data separation and numeric citation checks. These are best-effort checks, **not** formal proof that every answer is supported.
-- **Security:** upload size/extension checks and filename normalization only; no malware scanning or user isolation. Never handle confidential policy records in a public demo. Groq receives retrieved excerpt text.
-- **Evaluation:** source hit@k verifies locating labeled files, not necessarily retrieving the correct answer spans or making a factual answer.
+- **Session isolation** keeps the upload index and conversation in the visitor's session. A public demo has no account-level access control or malware scanning. Groq receives selected excerpts and bounded rewrite dialogue.
+- **Evaluation** checks for labeled excerpts at the retrieved ranks. Claim correctness requires separate evaluation.
 
 ## Demo checklist
 
