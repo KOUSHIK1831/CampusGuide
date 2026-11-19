@@ -1,16 +1,26 @@
 """Normalized vector indexing with FAISS by default and a NumPy test backend.
 
-Published index/metadata pairs are immutable snapshots; concurrent rebuilds cannot mismatch results.
+Dense, lexical, and metadata indexes are published together as immutable snapshots.
 Persistence is JSON + FAISS/NumPy, never untrusted pickle deserialization.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from pathlib import Path
 from threading import RLock
 from typing import Any
 
 import numpy as np
+
+from .retrieval import BM25Index, MAX_RERANK_CANDIDATES, Reranker, fuse_ranks, rerank_hits
+
+
+@dataclass(frozen=True)
+class _IndexSnapshot:
+    index: Any
+    chunks: tuple[dict, ...]
+    lexical: BM25Index
 
 
 class VectorStore:
@@ -28,8 +38,7 @@ class VectorStore:
         self.encoder = encoder
         self.backend = backend
         self._lock = RLock()
-        # Publish a single index + metadata snapshot; never mutate one after publication.
-        self._snapshot: tuple[Any, tuple[dict, ...]] | None = None
+        self._snapshot: _IndexSnapshot | None = None
 
     def _encoder(self) -> Any:
         if self.encoder is None:
@@ -67,33 +76,85 @@ class VectorStore:
         else:
             index = vectors
         metadata = tuple(dict(chunk) for chunk in chunks)
+        snapshot = _IndexSnapshot(index, metadata, BM25Index(metadata))
         with self._lock:
-            self._snapshot = (index, metadata)
+            self._snapshot = snapshot
 
-    def search(self, query: str, top_k: int = 4, min_score: float = 0.30) -> list[dict]:
+    def search(
+        self, query: str, top_k: int = 4, min_score: float = 0.30,
+        *, mode: str = "dense", reranker: Reranker | None = None,
+    ) -> list[dict]:
+        """Search using cosine alone or fuse it with BM25, then optionally rerank."""
         if not query.strip():
             return []
         if top_k < 1 or not -1 <= min_score <= 1:
             raise ValueError("top_k must be positive and min_score within [-1,1]")
+        if mode not in {"dense", "hybrid"}:
+            raise ValueError("mode must be 'dense' or 'hybrid'")
         with self._lock:
             snapshot = self._snapshot
         if snapshot is None:
             return []
-        # Retain the matching index and metadata throughout this retrieval.
-        index, chunks = snapshot
         vector = self.embed([query])
-        count = min(top_k, len(chunks))
+        limit = top_k
+        if mode == "hybrid" or reranker is not None:
+            limit = max(top_k, min(4 * top_k, MAX_RERANK_CANDIDATES))
+        # Read past repeats so they cannot crowd out the bounded pool of unique hits.
+        duplicates = snapshot.lexical.duplicate_count if mode == "hybrid" else 0
+        count = min(limit + duplicates, len(snapshot.chunks))
+        pairs = self._dense_pairs(snapshot.index, vector, count)
+        dense = [
+            (score, position) for score, position in pairs
+            if 0 <= position < len(snapshot.chunks) and score >= min_score
+        ]
+
+        if mode == "hybrid":
+            hits = self._hybrid_hits(snapshot, query, vector[0], dense, limit)
+        else:
+            hits = [
+                {**snapshot.chunks[position], "score": round(score, 4)}
+                for score, position in dense
+            ]
+        if reranker is not None:
+            hits = rerank_hits(query, hits, reranker)
+        return hits[:top_k]
+
+    def _dense_pairs(self, index: Any, vector: np.ndarray, count: int) -> list[tuple[float, int]]:
         if self.backend == "faiss":
             scores, positions = index.search(vector, count)
-            pairs = zip(scores[0], positions[0])
-        else:
-            scores = index @ vector[0]
-            positions = np.argsort(-scores, kind="stable")[:count]
-            pairs = ((scores[i], i) for i in positions)
-        return [
-            {**chunks[int(i)], "score": round(float(score), 4)}
-            for score, i in pairs if 0 <= int(i) < len(chunks) and float(score) >= min_score
-        ]
+            return [(float(score), int(position)) for score, position in zip(scores[0], positions[0])]
+        scores = index @ vector[0]
+        positions = np.argsort(-scores, kind="stable")[:count]
+        return [(float(scores[position]), int(position)) for position in positions]
+
+    def _hybrid_hits(
+        self, snapshot: _IndexSnapshot, query: str, vector: np.ndarray,
+        dense: list[tuple[float, int]], limit: int,
+    ) -> list[dict]:
+        dense_rows = {}
+        for score, position in sorted(dense, key=lambda result: (-result[0], result[1])):
+            canonical = snapshot.lexical.canonical_positions[position]
+            dense_rows.setdefault(canonical, (position, score))
+            if len(dense_rows) == limit:
+                break
+        lexical = snapshot.lexical.search(query, dense_rows, limit)
+        fused = fuse_ranks(list(dense_rows), list(lexical))
+        hits = []
+        for canonical, fusion_score in list(fused.items())[:limit]:
+            if canonical in dense_rows:
+                position, score = dense_rows[canonical]
+            else:
+                position = canonical
+                if self.backend == "faiss":
+                    passage_vector = snapshot.index.reconstruct(position)
+                else:
+                    passage_vector = snapshot.index[position]
+                score = float(passage_vector @ vector)
+            hits.append({
+                **snapshot.chunks[position], "score": round(score, 4),
+                "lexical_score": lexical.get(canonical), "fusion_score": fusion_score,
+            })
+        return hits
 
     def save(self) -> None:
         # Write index and metadata from the SAME snapshot, under the instance I/O lock.
@@ -101,7 +162,7 @@ class VectorStore:
             snapshot = self._snapshot
             if snapshot is None:
                 raise ValueError("No index to save")
-            index, chunks = snapshot
+            index, chunks = snapshot.index, snapshot.chunks
             self.directory.mkdir(parents=True, exist_ok=True)
             metadata = {
                 "model_name": self.model_name,
@@ -138,13 +199,14 @@ class VectorStore:
                 raise ValueError("Index and metadata count mismatch; rebuild the index")
             if not chunks:
                 return False
-            self._snapshot = (index, tuple(dict(chunk) for chunk in chunks))
+            metadata = tuple(dict(chunk) for chunk in chunks)
+            self._snapshot = _IndexSnapshot(index, metadata, BM25Index(metadata))
             return True
 
     def stats(self) -> dict:
         with self._lock:
             snapshot = self._snapshot
-        chunks = snapshot[1] if snapshot is not None else ()
+        chunks = snapshot.chunks if snapshot is not None else ()
         return {
             "chunks": len(chunks),
             "documents": len({chunk["source"] for chunk in chunks}),

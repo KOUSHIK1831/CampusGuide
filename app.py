@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import os
+from itertools import pairwise
 
 import streamlit as st
 from dotenv import load_dotenv
 
 from campusguide_rag import RAGChatbot, VectorStore
+from campusguide_rag.chatbot import MAX_HISTORY_TURNS
+from campusguide_rag.retrieval import CrossEncoderReranker
 from campusguide_rag.upload_workflow import (
     MAX_UPLOAD_FILES, prepare_uploaded_documents, upload_fingerprint,
 )
@@ -16,6 +19,8 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM
 BACKEND = os.getenv("VECTOR_BACKEND", "faiss")
 LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-20b")
 MIN_SCORE = float(os.getenv("MIN_RETRIEVAL_SCORE", "0.30"))
+RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "hybrid")
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "").strip()
 
 
 @st.cache_resource(show_spinner="Loading the embedding model...")
@@ -23,6 +28,54 @@ def get_embedding_model(model_name: str):
     """Share only model weights: never cache an index, uploaded text, or API key."""
     from sentence_transformers import SentenceTransformer
     return SentenceTransformer(model_name, device="cpu")
+
+
+@st.cache_resource
+def get_reranker(model_name: str) -> CrossEncoderReranker:
+    """Cache the scorer with model weights only, never its inputs or results."""
+    return CrossEncoderReranker(model_name)
+
+
+def recent_conversation(messages: list[dict]) -> list[dict]:
+    """Return bounded, complete turns with citation-checked final responses."""
+    recent = []
+    for assistant, user in pairwise(reversed(messages)):
+        if (assistant["role"] != "assistant" or user["role"] != "user"
+                or not assistant.get("sources")):
+            continue
+        recent.extend([
+            {"role": "assistant", "content": assistant["content"]},
+            {"role": "user", "content": user["content"]},
+        ])
+        if len(recent) == 2 * MAX_HISTORY_TURNS:
+            break
+    return recent[::-1]
+
+
+def render_message(message: dict) -> None:
+    if message["role"] == "user":
+        st.text(message["content"])
+        return
+    st.markdown(message["content"])
+    if message.get("sources"):
+        st.caption("Citation references checked.")
+    for notice in message.get("notices", []):
+        st.caption(notice)
+    for source in message.get("sources", []):
+        label = f"[{source['ref']}] {source['source']}"
+        if source.get("page"):
+            label += f" · page {source['page']}"
+        with st.expander(label):
+            details = []
+            if source.get("score") is not None:
+                details.append(f"Cosine similarity {source['score']:.3f}")
+            for field, name in (("policy_id", "Policy"), ("version", "Version"),
+                                ("effective_date", "Effective")):
+                if source.get(field):
+                    details.append(f"{name} {source[field]}")
+            if details:
+                st.text(" · ".join(details))
+            st.code(source["excerpt"], language=None)
 
 
 def clear_my_session() -> None:
@@ -80,20 +133,17 @@ def main() -> None:
             st.metric("Indexed documents", stats["documents"])
             st.metric("Indexed chunks", stats["chunks"])
         st.button("Clear my session", on_click=clear_my_session, use_container_width=True)
-        st.caption("Uploaded content and its index are kept in this session's memory, not written by the app to disk. Avoid sensitive documents. Relevant excerpts are sent to Groq when you ask a question.")
+        st.caption(
+            "Your uploads and index stay in this app session’s memory. CampusGuide sends "
+            "your question, relevant excerpts, and recent conversation context to Groq "
+            "when needed to answer a question or interpret a follow-up. "
+            "Avoid uploading sensitive documents."
+        )
 
-    if "chat_history" not in st.session_state:
-        st.session_state["chat_history"] = []
-    for message in st.session_state["chat_history"]:
+    messages = st.session_state.setdefault("chat_history", [])
+    for message in messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            for source in message.get("sources", []):
-                label = f"[{source['ref']}] {source['source']}"
-                if source.get("page"):
-                    label += f" · page {source['page']}"
-                with st.expander(label):
-                    st.caption(f"Similarity: {source['score']:.3f}")
-                    st.code(source["excerpt"], language=None)
+            render_message(message)
 
     store = st.session_state.get("document_store")
     if not store or not store.ready:
@@ -104,26 +154,50 @@ def main() -> None:
         "Ask a question about your uploaded files...",
         disabled=not store or not store.ready or not api_key.strip(),
     )
-    if question:
-        st.session_state["chat_history"].append({"role": "user", "content": question})
+    if not question:
+        return
+
+    user_message = {"role": "user", "content": question}
+    with st.chat_message("user"):
+        render_message(user_message)
+    with st.chat_message("assistant"):
+        draft = st.empty()
+        with draft.container():
+            status = st.empty()
+            status.caption("Searching your documents…")
+            preview = st.empty()
+        deltas: list[str] = []
+
+        def show_delta(delta: str) -> None:
+            if not deltas:
+                status.caption("Draft answer · citation checks pending")
+            deltas.append(delta)
+            preview.text("".join(deltas))
+
         try:
-            from groq import Groq
-            # Never place the user's key in os.environ, cache_resource, disk, or logs.
-            # Create a client for the current user's request only.
-            with st.spinner("Searching the uploaded documents and generating an answer..."):
-                bot = RAGChatbot(
-                    store, llm_client=Groq(api_key=api_key.strip()),
-                    model=LLM_MODEL, min_score=MIN_SCORE,
-                )
-                result = bot.ask(question)
-            st.session_state["chat_history"].append({
+            reranker = None
+            if RERANKER_MODEL and RETRIEVAL_MODE == "hybrid":
+                reranker = get_reranker(RERANKER_MODEL)
+            bot = RAGChatbot(
+                store, api_key=api_key.strip(), model=LLM_MODEL, min_score=MIN_SCORE,
+                retrieval_mode=RETRIEVAL_MODE, reranker=reranker,
+            )
+            result = bot.ask(question, history=recent_conversation(messages), on_delta=show_delta)
+            assistant_message = {
                 "role": "assistant", "content": result["answer"], "sources": result["sources"],
-            })
-        except (RuntimeError, ValueError) as exc:
-            st.session_state["chat_history"].append({
-                "role": "assistant", "content": str(exc), "sources": [],
-            })
-        st.rerun()
+                "notices": result.get("notices", []),
+            }
+        except RuntimeError as exc:
+            assistant_message = {"role": "assistant", "content": str(exc), "sources": []}
+        except ValueError:
+            assistant_message = {
+                "role": "assistant", "content": "CampusGuide could not process this request.",
+                "sources": [],
+            }
+        finally:
+            draft.empty()
+        render_message(assistant_message)
+    messages.extend([user_message, assistant_message])
 
 
 if __name__ == "__main__":

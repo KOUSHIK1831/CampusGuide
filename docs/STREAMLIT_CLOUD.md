@@ -30,9 +30,9 @@ CampusGuide is a **bring-your-own-Groq-key, upload-and-chat RAG app**. The publi
 
 ## Operational behavior
 
-- Uploads are parsed **in memory** (not written by the application to disk) and indexes are held in `st.session_state` per user. The only shared cached resource is the pretrained embedding model. Do not change this to a shared `@st.cache_resource` vector store.
+- Uploads are parsed in memory and indexes are held in `st.session_state` per user. Shared cached resources are limited to model weights for embeddings and the optional reranker.
 - Each session can upload up to **10 files**, at most **15 MB per file** and **40 MB combined**. Uploaded files are re-indexed only after pressing the process button. Changing selected files invalidates the old index and conversation.
-- Your Groq key is used to construct a client **per request** and is never stored in environment variables, project files, or a shared cache by this application. Groq receives selected document excerpts for each question.
+- Your Groq key is used to construct a client per request. The app keeps it in the active session. Groq receives selected excerpts for answering and up to four previous successful turns for later query rewrites.
 - Session data is not permanent. Reconnecting, clearing state, and app restarts can remove documents and conversation. Avoid sensitive documents; the host and model provider still process submitted data.
 - This is an unauthenticated public application with no durable user storage, system-wide rate limiting, or OCR. Community Cloud memory limits may affect embedding-model startup and large uploads.
 - If an old shared Groq API key was placed on Render, revoke it and remove it from Render's service configuration when no longer needed; it is not needed here.

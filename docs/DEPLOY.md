@@ -16,7 +16,7 @@ If you previously configured `GROQ_API_KEY` in an existing Render service, **rem
 4. Watch the Docker build, runtime logs, and health status. Streamlit binds to the `PORT` provided by Render.
 5. Open the **actual Render-assigned URL**. Supply your own Groq key in the sidebar, upload a text-based document, click **Process uploaded documents**, ask a grounded question, and inspect its source citations.
 
-Limitations: Render's free plan may lack enough RAM for PyTorch and Sentence Transformers; filesystem state is ephemeral; uploads are limited to ten files (15 MB per file / 40 MB combined). The app has no global anti-abuse controls or authentication. Avoid uploading confidential data; document excerpts are sent to Groq during answer generation.
+Render's free plan may lack enough RAM for PyTorch and Sentence Transformers. Uploads are limited to ten files, 15 MB per file and 40 MB combined. The app has no global anti-abuse controls or authentication. Groq receives relevant document excerpts for answering and a limited amount of prior dialogue for rewriting queries. Avoid uploading confidential data.
 
 For local Docker testing, use:
 

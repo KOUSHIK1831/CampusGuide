@@ -1,4 +1,9 @@
+import json
 from types import SimpleNamespace
+
+import httpx
+import pytest
+from groq import Groq
 
 from campusguide_rag import RAGChatbot, REFUSAL_TEXT
 
@@ -6,8 +11,12 @@ from campusguide_rag import RAGChatbot, REFUSAL_TEXT
 class FakeStore:
     def __init__(self, hits):
         self.hits = hits
+        self.queries = []
 
     def search(self, query, top_k=4, min_score=0.30):
+        self.queries.append(query)
+        if isinstance(self.hits, dict):
+            return self.hits.get(query, [])
         return self.hits
 
 
@@ -19,7 +28,10 @@ class FakeClient:
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self.answer))])
+        answer = self.answer.pop(0) if isinstance(self.answer, list) else self.answer
+        if isinstance(answer, Exception):
+            raise answer
+        return {"choices": [{"message": {"role": "assistant", "content": answer}, "finish_reason": "stop"}]}
 
 
 HITS = [{"source": "policy.pdf", "page": 2, "text": "Students borrow four books.", "score": 0.85}]
@@ -111,3 +123,114 @@ def test_citations_include_all_passage_text_sent_to_llm():
     assert answer["sources"][0]["excerpt"] == passage
     assert passage in client.calls[0]["messages"][1]["content"]
     assert "May 24" in answer["sources"][0]["excerpt"]
+
+
+def test_rewrite_uses_bounded_completed_history_and_keeps_original_question():
+    original = "How many can I borrow?"
+    standalone = "How many library books can I borrow?"
+    history = [
+        {"role": role, "content": f"{role}-{i} " + ("x" * 1200), "sources": ["never forwarded"]}
+        for i in range(7) for role in ("user", "assistant")
+    ]
+    history += [{"role": "user", "content": "unanswered turn"}]
+    client = FakeClient([standalone, "Students may borrow four books [1]."])
+    store = FakeStore({standalone: HITS})
+    result = RAGChatbot(store, client).ask(original, history=history)
+
+    rewrite_prompt = client.calls[0]["messages"][1]["content"]
+    prior = json.loads(rewrite_prompt.split("\n\nCurrent question:")[0].split("\n", 1)[1])
+    assert 0 < len(prior) <= 8
+    assert all(set(message) == {"role", "content"} for message in prior)
+    assert all(len(message["content"]) <= 1000 for message in prior)
+    assert "assistant-6" in rewrite_prompt
+    assert "user-0" not in rewrite_prompt
+    assert "unanswered turn" not in rewrite_prompt
+    assert store.queries == [standalone]
+    assert f"Original question: {original}" in client.calls[1]["messages"][1]["content"]
+    assert "assistant-6" not in client.calls[1]["messages"][1]["content"]
+    assert result["search_query"] == standalone
+    assert result["rewrite_status"] == "rewritten"
+
+
+@pytest.mark.parametrize(
+    ("rewrite", "queries"),
+    [
+        ("Wrong topic?", ["Wrong topic?", "What about this one?"]),
+        ("line 1\nline 2", ["What about this one?"]),
+        (ProviderStatusError(503), ["What about this one?"]),
+    ],
+)
+def test_unusable_rewrite_recovers_to_original_question(rewrite, queries):
+    question = "What about this one?"
+    store = FakeStore({question: HITS})
+    client = FakeClient([rewrite, "Students may borrow four books [1]."])
+    history = [{"role": "user", "content": "Library?"}, {"role": "assistant", "content": "Books [1]."}]
+
+    result = RAGChatbot(store, client).ask(question, history=history)
+
+    assert store.queries == queries
+    assert result["search_query"] == question
+    assert result["rewrite_status"] == "fallback"
+    assert result["sources"]
+
+
+@pytest.mark.parametrize(
+    ("ending", "finish", "accepted"),
+    [(" [1].", "stop", True), (" [99].", "stop", False),
+     (" [1].", "length", False), (" [1].", None, False)],
+)
+def test_groq_sdk_stream_via_langchain_validates_complete_response(ending, finish, accepted):
+    deltas = []
+
+    def post_completion(request):
+        params = json.loads(request.content)
+        assert request.headers["Authorization"] == "Bearer test-session-key"
+        assert params["stream"] is True
+        assert params["include_reasoning"] is False
+        assert params["reasoning_effort"] == "low"
+        frames = [
+            ({"role": "assistant", "reasoning": "hidden text"}, None),
+            ({"content": "Four books"}, None),
+            ({"content": ending}, None),
+            ({}, finish),
+        ]
+        body = [
+            "data: " + json.dumps({"choices": [{"index": 0, "delta": delta, "finish_reason": reason}]})
+            for delta, reason in frames
+        ]
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              text="\n\n".join([*body, "data: [DONE]", ""]))
+
+    transport = httpx.MockTransport(post_completion)
+    with Groq(api_key="test-session-key", http_client=httpx.Client(transport=transport)) as client:
+        result = RAGChatbot(FakeStore(HITS), client).ask("How many?", on_delta=deltas.append)
+
+    assert deltas == ["Four books", ending]
+    assert result["answer"] == ("Four books [1]." if accepted else REFUSAL_TEXT)
+    assert bool(result["sources"]) == accepted
+
+
+def test_provider_error_after_partial_stream_is_sanitized():
+    class InterruptedClient(FakeClient):
+        def create(self, **kwargs):
+            yield {"choices": [{"delta": {"role": "assistant", "content": "Partial [1]"}}]}
+            raise ProviderStatusError(503)
+
+    deltas = []
+    with pytest.raises(RuntimeError, match="temporarily unavailable") as error:
+        RAGChatbot(FakeStore(HITS), InterruptedClient("")).ask("How many?", on_delta=deltas.append)
+    assert deltas == ["Partial [1]"]
+    assert "SECRET_PROVIDER_RESPONSE" not in str(error.value)
+
+
+def test_policy_metadata_and_conflict_guidance_reach_generation_and_citations():
+    old = {**HITS[0], "policy_id": "LIB-001", "version": "1", "effective_date": "2024-09-01"}
+    new = {**old, "source": "library-v2.pdf", "version": "2", "effective_date": "2025-01-01",
+           "text": "Students borrow six books."}
+    client = FakeClient("The 2025 version states six books [2]. The 2024 version states four [1].")
+    result = RAGChatbot(FakeStore([old, new]), client).ask("How did the rule change?")
+    system, user = client.calls[0]["messages"]
+    assert "conflicting guidance" in system["content"]
+    assert '"effective_date": "2025-01-01"' in user["content"]
+    assert [source["version"] for source in result["sources"]] == ["1", "2"]
+    assert all(source["policy_id"] == "LIB-001" for source in result["sources"])
